@@ -26,4 +26,4 @@ desktop.ini
 *.log
 coverage/
 node_modules/
-vendor/
+vendor/traces/
