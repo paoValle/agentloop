@@ -126,6 +126,12 @@ export async function run(options: RunOptions): Promise<RunResult> {
     runId: options.runId ?? 'run',
     messages,
     tools: tools.names(),
+    parameters: {
+      budgetLimit: budget.limit,
+      maxSteps,
+      stepAllowance: estimation.stepAllowance,
+      price,
+    },
   });
 
   for (let step = 0; step < maxSteps; step++) {

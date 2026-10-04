@@ -11,6 +11,8 @@ import {
 
 const fisso = (): Trace => new Trace({ clock: () => 1_700_000_000_000 });
 
+const parametri = { budgetLimit: 1_000_000, maxSteps: 12, stepAllowance: 50_000, price: { input: 3, output: 15 } };
+
 describe('toTraceable: non deve mai fallire', () => {
   it('passa attraverso i valori semplici', () => {
     expect(toTraceable({ a: 1, b: 'x', c: [true, null] })).toEqual({ a: 1, b: 'x', c: [true, null] });
@@ -86,7 +88,7 @@ describe('troncamento', () => {
 describe('Trace', () => {
   it('assegna seq monotoni e gap-free', () => {
     const trace = fisso();
-    trace.append({ type: 'run.start', runId: 'r1', messages: [], tools: [] });
+    trace.append({ type: 'run.start', runId: 'r1', messages: [], tools: [], parameters: parametri });
     trace.append({ type: 'step.start', step: 0 });
     trace.append({ type: 'step.start', step: 1 });
     expect(trace.events.map((e) => e.seq)).toEqual([0, 1, 2]);
@@ -102,7 +104,7 @@ describe('Trace', () => {
 
   it('JSONL: una riga per evento, e il ritorno all’identico', () => {
     const trace = fisso();
-    trace.append({ type: 'run.start', runId: 'r1', messages: [{ role: 'user', content: 'ciao' }], tools: ['a'] });
+    trace.append({ type: 'run.start', runId: 'r1', messages: [{ role: 'user', content: 'ciao' }], tools: ['a'], parameters: parametri });
     trace.append({ type: 'run.end', steps: 0, stopReason: 'end_turn', spent: 0, spentUsd: '0.000000' });
 
     const righe = trace.toJSONL().split('\n');
@@ -115,7 +117,7 @@ describe('Trace', () => {
 
   it('una riga malformata è un errore, non un buco silenzioso', () => {
     const trace = fisso();
-    trace.append({ type: 'run.start', runId: 'r1', messages: [], tools: [] });
+    trace.append({ type: 'run.start', runId: 'r1', messages: [], tools: [], parameters: parametri });
     expect(() => Trace.parse(`${trace.toJSONL()}\n{rotto`)).toThrow(SyntaxError);
     expect(() => Trace.parse(`${trace.toJSONL()}\n{rotto`)).toThrow(/riga 2/);
   });

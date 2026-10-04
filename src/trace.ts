@@ -31,9 +31,33 @@ interface TraceBase {
   readonly ts: number;
 }
 
+/** I parametri che determinano un run: senza, la traccia non basta a rifarlo. */
+export interface RunParameters {
+  /** Tetto di spesa, in µUSD. */
+  readonly budgetLimit: number;
+  /** Tetto di passi. */
+  readonly maxSteps: number;
+  /** Stima con cui parte il primo passo, in µUSD. */
+  readonly stepAllowance: number;
+  /**
+   * Il prezzo **risolto** per il modello di questo run, in µUSD per milione di token.
+   *
+   * Si registra il prezzo effettivo e non la tabella: è ciò che ha determinato la
+   * spesa, e un replay che ricalcolasse con prezzi diversi produrrebbe una spesa
+   * diversa e si fermerebbe a un passo diverso.
+   */
+  readonly price: { readonly input: number; readonly output: number };
+}
+
 /** Tutti gli eventi che un run può produrre. */
 export type TraceEvent =
-  | (TraceBase & { type: 'run.start'; runId: string; messages: readonly Message[]; tools: readonly string[] })
+  | (TraceBase & {
+      type: 'run.start';
+      runId: string;
+      messages: readonly Message[];
+      tools: readonly string[];
+      parameters: RunParameters;
+    })
   | (TraceBase & { type: 'step.start'; step: number })
   | (TraceBase & { type: 'policy.request'; step: number; model: string; messageCount: number })
   | (TraceBase & { type: 'policy.response'; step: number; model: string; usage: Usage; decision: Decision })
@@ -232,14 +256,29 @@ export class Trace {
   }
 
   /**
-   * Proiezione senza `ts`, per confrontare due run.
+   * La proiezione confrontabile: due run della stessa conversazione devono produrre
+   * proiezioni identiche.
    *
-   * Due esecuzioni della stessa conversazione hanno tempi diversi per definizione:
-   * confrontarle è utile proprio perché tutto il resto deve coincidere. `seq` resta,
-   * perché indica la posizione e quella deve essere la stessa.
+   * Sono esclusi **due** campi, ed entrambi per costruzione, non per comodità:
+   *
+   * - `ts`: due esecuzioni hanno tempi diversi per definizione.
+   * - `tool.call.fingerprint`: nel replay il tool è una **ricostruzione** con un
+   *   corpo diverso, quindi la sua impronta è diversa per costruzione. Escluderlo qui
+   *   non significa ignorare che il tool sia cambiato: quel controllo è un altro, e
+   *   più severo — è l'avviso di ADR 0003, che guarda il tool **vero** contro
+   *   l'impronta registrata e non lo lascia mai passare in silenzio.
+   *
+   * `seq` resta, perché indica la posizione e quella deve coincidere.
    */
   normalized(): unknown[] {
-    return this.#events.map(({ ts: _ts, ...rest }) => rest);
+    return this.#events.map((event) => {
+      const { ts: _ts, ...rest } = event;
+      if (rest.type === 'tool.call') {
+        const { fingerprint: _fingerprint, ...senza } = rest;
+        return senza;
+      }
+      return rest;
+    });
   }
 }
 
