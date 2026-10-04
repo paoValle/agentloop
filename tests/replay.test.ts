@@ -48,7 +48,7 @@ const cercaVoli: Tool = {
     properties: { da: { type: 'string' }, a: { type: 'string' } },
     required: ['da', 'a'],
   },
-  execute: (input) => [{ compagnia: 'ITA', prezzo: 90 }],
+  execute: () => [{ compagnia: 'ITA', prezzo: 90 }],
 };
 
 const eseguiRun = async (tools: ToolRegistry = new ToolRegistry([cercaVoli])) => {

@@ -36,8 +36,8 @@ export type { PriceTable };
 export interface Estimation {
   /** Stima per un passo ancora senza dati: il default è 5 ¢. */
   stepAllowance: MicroUsd;
-  /** Il massimo osservato finora nel run, se c'è. */
-  observedMax?: MicroUsd;
+  /** Il massimo osservato finora. Zero finché non c'è stato nessun passo. */
+  observedMax: MicroUsd;
 }
 
 export interface RunOptions {
@@ -102,7 +102,10 @@ export async function run(options: RunOptions): Promise<RunResult> {
   const trace = options.trace ?? new Trace();
   const maxSteps = options.maxSteps ?? DEFAULT_MAX_STEPS;
   const prices = options.prices ?? {};
-  const model = options.policy.model;
+  // dichiarato come `string | undefined` di proposito: `Policy.model` è obbligatorio
+  // in TypeScript, ma una Policy può arrivare da JavaScript o da un cast. Un tetto
+  // che non sa il prezzo è peggio di nessun tetto, quindi si controlla comunque.
+  const model = options.policy.model as string | undefined;
 
   if (options.messages.length === 0) {
     throw new TypeError('un run ha bisogno di almeno un messaggio iniziale');
@@ -114,6 +117,7 @@ export async function run(options: RunOptions): Promise<RunResult> {
   const price = resolvePrice(prices, model);
   const estimation: Estimation = {
     stepAllowance: options.stepAllowance ?? DEFAULT_STEP_ALLOWANCE,
+    observedMax: micros(0),
   };
 
   let messages: Message[] = [...options.messages];
@@ -144,7 +148,7 @@ export async function run(options: RunOptions): Promise<RunResult> {
     const stepId = `step-${steps}`;
     trace.append({ type: 'step.start', step });
 
-    const estimate = estimation.observedMax ?? estimation.stepAllowance;
+    const estimate = estimation.observedMax > estimation.stepAllowance ? estimation.observedMax : estimation.stepAllowance;
     let reservation;
     try {
       reservation = budget.reserve(estimate);
@@ -173,7 +177,7 @@ export async function run(options: RunOptions): Promise<RunResult> {
 
     const actual = costOf(outcome.usage, price);
     budget.settle(reservation, actual);
-    estimation.observedMax = max(estimation.observedMax ?? 0, actual);
+    estimation.observedMax = max(estimation.observedMax, actual);
 
     trace.append({
       type: 'policy.response',
@@ -299,7 +303,10 @@ function asContent(output: unknown): string {
   if (typeof output === 'string') return output;
   if (output === undefined) return '(nessun risultato)';
   try {
-    return JSON.stringify(output) ?? '(risultato non serializzabile)';
+    // annotato come `string | undefined` perché a runtime può esserlo:
+    // `JSON.stringify` restituisce `undefined` per una funzione o un simbolo
+    const serializzato: unknown = JSON.stringify(output);
+    return typeof serializzato === 'string' ? serializzato : '(risultato non serializzabile)';
   } catch {
     return '(risultato non serializzabile)';
   }
@@ -321,11 +328,11 @@ export function resolvePrice(prices: PriceTable, model: string): Price {
   const entries = Object.values(prices);
   if (entries.length === 0) return { input: micros(0), output: micros(0) };
   return {
-    input: Math.max(...entries.map((p) => p.input)),
-    output: Math.max(...entries.map((p) => p.output)),
+    input: Math.max(...entries.map((p) => p.input)) as MicroUsd,
+    output: Math.max(...entries.map((p) => p.output)) as MicroUsd,
   };
 }
 
-function max(a: number, b: number): number {
+function max(a: MicroUsd, b: MicroUsd): MicroUsd {
   return a > b ? a : b;
 }

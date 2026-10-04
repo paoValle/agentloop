@@ -32,11 +32,13 @@ const TOKENS_PER_PRICE_UNIT = 1_000_000;
 /**
  * Un importo in micro-dollari. Tipo marchiato: non è un numero qualsiasi.
  *
- * Serve a rendere impossibile, in compilazione, il classico bug di passare
- * dollari dove si aspettavano micro-dollari — che è un errore di 10⁶, invisibile
- * nei test e devastante in produzione.
+ * Il marchio ha una proprietà **obbligatoria**: è ciò che rende `number` non
+ * assegnabile a `MicroUsd`. Con una proprietà opzionale il tipo non marcherebbe
+ * niente — `number` resterebbe compatibile e il bug che si vuole prevenire
+ * (passare dollari dove si aspettavano micro-dollari, errore di 10⁶) tornerebbe
+ * esattamente uguale.
  */
-export type MicroUsd = number & { readonly __unit?: 'MicroUsd' };
+export type MicroUsd = number & { readonly __unit: 'MicroUsd' };
 
 /** Costruisce un `MicroUsd` da dollari (`0.25` → `250_000` µUSD). */
 export function usd(amount: number): MicroUsd {
@@ -101,8 +103,8 @@ export interface Reservation {
  */
 export class Budget {
   #limit: MicroUsd;
-  #committed: MicroUsd = 0;
-  #reserved: MicroUsd = 0;
+  #committed: MicroUsd = micros(0);
+  #reserved: MicroUsd = micros(0);
   #nextId = 1;
   #open = new Map<number, MicroUsd>();
 
@@ -162,7 +164,7 @@ export class Budget {
       throw new BudgetExceededError(value, this.available);
     }
     const id = this.#nextId++;
-    this.#reserved += value;
+    this.#reserved = (this.#reserved + value) as MicroUsd;
     this.#open.set(id, value);
     return { id, amount: value };
   }
@@ -177,14 +179,14 @@ export class Budget {
   settle(reservation: Reservation, actual: MicroUsd): void {
     const held = this.#take(reservation);
     const value = assertNonNegativeFinite(actual) as MicroUsd;
-    this.#reserved -= held;
-    this.#committed += value;
+    this.#reserved = (this.#reserved - held) as MicroUsd;
+    this.#committed = (this.#committed + value) as MicroUsd;
   }
 
   /** Rilascia la prenotazione senza spendere: la stima si è rivelata sovrastimata. */
   release(reservation: Reservation): void {
     const held = this.#take(reservation);
-    this.#reserved -= held;
+    this.#reserved = (this.#reserved - held) as MicroUsd;
   }
 
   /** Dettaglio per traccia e log. */
