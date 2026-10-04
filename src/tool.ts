@@ -179,8 +179,32 @@ export async function invokeTool(
   }
 }
 
+/**
+ * Errore interno: il messaggio da rimettere nel contesto è **già deciso**.
+ *
+ * Serve solo al replay (ADR 0003). Un tool che nella run originale è fallito con un
+ * errore interno ha già prodotto un messaggio neutro; per rifare la stessa run non si
+ * può rieseguire il codice del tool e ricostruire l'errore, quindi si conserva il
+ * `ToolFailure` per intero — messaggio e `detail` — e lo si reinietta. Non è un
+ * `ToolError`: la sua descrizione passerebbe per la regola di ADR 0004, aggiungerebbe
+ * il suffisso di riprova e perderebbe il `detail`.
+ *
+ * @internal
+ */
+export class ReplayedFailure extends Error {
+  constructor(readonly failure: ToolFailure) {
+    super(failure.message);
+    this.name = 'ReplayedFailure';
+  }
+}
+
 /** Traduce un'eccezione in un `ToolFailure`, applicando ADR 0004. */
 function describeFailure(tool: string, error: unknown): ToolFailure {
+  // prima di tutto: il replay riproduce il fallimento già deciso, struttura compresa
+  if (error instanceof ReplayedFailure) {
+    return error.failure;
+  }
+
   if (error instanceof ToolError) {
     const retry = error.retryable
       ? 'Puoi riprovare con gli stessi argomenti.'
