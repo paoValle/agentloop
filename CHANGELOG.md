@@ -5,14 +5,21 @@ versioni [SemVer](https://semver.org/lang/it/).
 
 ## [Non rilasciato]
 
-### Aggiunto
-### Modificato
-### Corretto
-### Rimosso
+## [0.1.0] - 2026-10-04
 
-<!--
-Quando esce una versione:
-## [0.1.0] - 2026-03-14
+Prima versione utilizzabile. Niente stabilità promossa: è un side project.
+
 ### Aggiunto
-- prima cosa che vede l'utente
--->
+- `run()`: il ciclo agentico, con budget a prenotazione e tetto di passi
+- `Budget`: prenotazione → saldo, importi interi in micro-dollari, `unlimited()`
+- `ToolRegistry`: nome, descrizione, schema e unicità verificati all'ingresso
+- validatore JSON Schema in un sottoinsieme dichiarato, con errori per JSON Pointer
+- `ToolError`: l'unico modo intenzionale di dire qualcosa al modello (ADR 0004)
+- `Trace`: eventi in sola aggiunta, JSONL, ridazione per tool sensibili, degradazione esplicita
+- `replay()`: tre modalità (`full`, `live-tools`, `dry-run`) e avviso se il tool è cambiato
+- `openAICompatible()`: adapter per endpoint chat compatibili con OpenAI
+
+### Note
+- Nessuna dipendenza runtime. Node ≥ 22.
+- Streaming, tool paralleli e multi-provider sono fuori perimetro: vedi
+  [RFC 0001](docs/rfc/0001-perimetro.md).
