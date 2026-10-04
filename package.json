@@ -19,7 +19,7 @@
     "example": "tsx examples/agente-voli.ts"
   },
   "devDependencies": {
-    "typescript": "^5.7.0",
+    "typescript": "^7.0.2",
     "vitest": "^2.1.0",
     "eslint": "^9.17.0",
     "typescript-eslint": "^8.19.0",
