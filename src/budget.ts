@@ -59,6 +59,9 @@ export interface Price {
   readonly output: MicroUsd;
 }
 
+/** Tabella dei prezzi indicati per modello: `{'gpt-4o': { input, output }, ...}`. */
+export type PriceTable = Readonly<Record<string, Price>>;
+
 /** Il prezzo di un modello esplicitamente dichiarato dal chiamante. */
 export const UNKNOWN_MODEL: Price = { input: micros(0), output: micros(0) };
 
@@ -105,6 +108,17 @@ export class Budget {
 
   constructor(limit: MicroUsd) {
     this.#limit = assertNonNegativeFinite(limit) as MicroUsd;
+  }
+
+  /**
+   * Un tetto che in pratica non esiste, dichiarato apertamente.
+   *
+   * Serve a due cose: ai test, che non hanno bisogno di fare i conti, e a chi *sa*
+   * che il run è economico. Il punto è che sia una **scelta** e non un default:
+   * `budget: new Budget(...)` rende la decisione leggibile in ogni diff.
+   */
+  static unlimited(): Budget {
+    return new Budget(Number.MAX_SAFE_INTEGER as MicroUsd);
   }
 
   /** Il tetto. */
