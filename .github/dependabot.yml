@@ -4,6 +4,24 @@ updates:
     directory: /
     schedule: { interval: weekly }
     open-pull-requests-limit: 5
+    # Gli aggiornamenti minor e patch si mergiano se la CI è verde. Le **major**
+    # no: uno major di TypeScript o di un linter non è un bump, è una decisione che
+    # spetta a una persona. Un PR di major fallito tutte le settimane è rumore che
+    # copre i PR veri.
+    versioning-strategy: increase
+    ignore:
+      - dependency-name: typescript
+        update-types: ['version-update:semver-major']
+      - dependency-name: vitest
+        update-types: ['version-update:semver-major']
+      - dependency-name: eslint
+        update-types: ['version-update:semver-major']
+      - dependency-name: typescript-eslint
+        update-types: ['version-update:semver-major']
+
   - package-ecosystem: github-actions
     directory: /
     schedule: { interval: monthly }
+    ignore:
+      - dependency-name: '*'
+        update-types: ['version-update:semver-major']
