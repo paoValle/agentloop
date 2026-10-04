@@ -109,7 +109,8 @@ describe('Trace', () => {
 
     const righe = trace.toJSONL().split('\n');
     expect(righe).toHaveLength(2);
-    expect(JSON.parse(righe[1] as string).stopReason).toBe('end_turn');
+    const secondo = JSON.parse(righe[1] as string) as { type: string; stopReason?: string };
+    expect(secondo.stopReason).toBe('end_turn');
 
     const riletta = Trace.parse(trace.toJSONL());
     expect(riletta.normalized()).toEqual(trace.normalized());

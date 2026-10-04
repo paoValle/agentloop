@@ -129,12 +129,14 @@ function encode(value: unknown, seen: WeakSet<object>, depth: number): unknown {
 
   const kind = typeof value;
   if (kind === 'string' || kind === 'boolean') return value;
-  if (kind === 'number') return Number.isFinite(value) ? value : { degraded: `${kind}: ${String(value)}` };
-  if (kind === 'bigint') return { degraded: `bigint: ${String(value)}` };
-  if (kind === 'function') return { degraded: `function: ${(value as { name?: string }).name || 'anonima'}` };
-  if (kind === 'symbol') return { degraded: `symbol: ${String(value)}` };
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : { degraded: `number: ${String(value)}` };
+  }
+  if (typeof value === 'bigint') return { degraded: `bigint: ${value.toString()}` };
+  if (typeof value === 'function') return { degraded: `function: ${value.name === '' ? 'anonima' : value.name}` };
+  if (typeof value === 'symbol') return { degraded: `symbol: ${value.description ?? 'senza descrizione'}` };
 
-  const object = value as object;
+  const object: object = value;
   if (seen.has(object)) return { degraded: 'ciclo' };
   if (depth > 12) return { degraded: 'profondità massima' };
 
@@ -164,7 +166,7 @@ function encode(value: unknown, seen: WeakSet<object>, depth: number): unknown {
 export function redact(value: unknown): Redacted {
   let bytes = 0;
   try {
-    bytes = JSON.stringify(toTraceable(value))?.length ?? 0;
+    bytes = JSON.stringify(toTraceable(value)).length;
   } catch {
     bytes = -1;
   }
@@ -186,7 +188,7 @@ export function prepareForTrace(
   const safe = toTraceable(value);
   let json: string;
   try {
-    json = JSON.stringify(safe) ?? 'null';
+    json = JSON.stringify(safe);
   } catch {
     return { degraded: 'non serializzabile' };
   }

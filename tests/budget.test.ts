@@ -122,7 +122,7 @@ describe('Budget: prenota, poi salda', () => {
   it('canAfford non prenota nulla', () => {
     const b = new Budget(usd(1));
     expect(b.canAfford(usd(1))).toBe(true);
-    expect(b.canAfford(usd(1) + 1)).toBe(false);
+    expect(b.canAfford(micros(usd(1) + 1))).toBe(false);
     expect(b.held).toBe(0);
   });
 
@@ -144,7 +144,7 @@ describe('Budget: tetto mai scavalcato nella somma', () => {
     const accepted: number[] = [];
     for (let i = 0; i < 10_000; i++) {
       try {
-        accepted.push(b.reserve(1).id);
+        accepted.push(b.reserve(micros(1)).id);
       } catch {
         break;
       }

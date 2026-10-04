@@ -16,7 +16,7 @@
  */
 
 import { UnsupportedSchemaKeywordError } from './errors.js';
-import type { JsonSchema, ValidationError } from './schema.js';
+import type { JsonSchema, JsonSchemaType, ValidationError } from './schema.js';
 import { SUPPORTED_KEYWORDS } from './schema.js';
 
 /**
@@ -49,7 +49,10 @@ export function assertSchemaSupported(schema: JsonSchema, path = '#'): void {
     } else if (key === 'items' && isSchema(value)) {
       assertSchemaSupported(value, here);
     } else if (key === 'anyOf' && Array.isArray(value)) {
-      value.forEach((sub, index) => assertSchemaSupported(sub, `${here}/${index}`));
+      const branches: unknown[] = value;
+      for (const [index, sub] of branches.entries()) {
+        if (isSchema(sub)) assertSchemaSupported(sub, `${here}/${index}`);
+      }
     }
   }
 }
@@ -81,10 +84,10 @@ export function validate(schema: JsonSchema, value: unknown, path = ''): Validat
   }
 
   if (schema.anyOf !== undefined) {
-    const alternatives = schema.anyOf;
-    const matches = alternatives.some((sub) => validate(sub, value).length === 0);
+    const alternative: readonly JsonSchema[] = schema.anyOf;
+    const matches = alternative.some((sub) => validate(sub, value).length === 0);
     if (!matches) {
-      const branches = alternatives
+      const branches = alternative
         .map((sub, index) => {
           const reasons = validate(sub, value)
             .map((error) => `${error.path || '<root>'} ${error.message}`)
@@ -94,7 +97,7 @@ export function validate(schema: JsonSchema, value: unknown, path = ''): Validat
         .join('\n');
       errors.push({
         path,
-        message: `non corrisponde a nessuna delle ${alternatives.length} forme ammesse:\n${branches}`,
+        message: `non corrisponde a nessuna delle ${alternative.length} forme ammesse:\n${branches}`,
       });
     }
   }
@@ -205,11 +208,12 @@ export function deepEqual(a: unknown, b: unknown): boolean {
 }
 
 function matchesType(type: JsonSchema['type'], value: unknown): boolean {
-  const types = Array.isArray(type) ? type : [type];
+  if (type === undefined) return true;
+  const types: readonly JsonSchemaType[] = Array.isArray(type) ? type : [type];
   return types.some((candidate) => matchesSingleType(candidate, value));
 }
 
-function matchesSingleType(type: NonNullable<JsonSchema['type']> & string, value: unknown): boolean {
+function matchesSingleType(type: JsonSchemaType, value: unknown): boolean {
   switch (type) {
     case 'string':
       return typeof value === 'string';
@@ -230,7 +234,8 @@ function matchesSingleType(type: NonNullable<JsonSchema['type']> & string, value
   }
 }
 
-function describeTypes(type: JsonSchema['type']): string {
+/** Nome leggibile di uno o più tipi attesi: `['string','null']` → `string o null`. */
+export function describeTypes(type: JsonSchema['type']): string {
   return Array.isArray(type) ? type.join(' o ') : String(type);
 }
 
@@ -251,7 +256,25 @@ function render(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(render).join(', ')}]`;
   if (isRecord(value)) return `{${Object.keys(value).join(', ')}}`;
   if (typeof value === 'number' && Number.isNaN(value)) return 'NaN';
-  return String(value);
+  switch (typeof value) {
+    case 'number':
+    case 'boolean':
+      return String(value);
+    case 'bigint':
+      return `${value}n`;
+    case 'symbol':
+      return value.toString();
+    case 'undefined':
+      return 'undefined';
+    case 'function':
+      return `[funzione ${value.name === '' ? 'anonima' : value.name}]`;
+    case 'object':
+    case 'string':
+      return '(valore)';
+  }
+  // TypeScript non può sapere che i casi sopra sono già coperti dai controlli in
+  // testa alla funzione; senza questo return la firma non è soddisfacibile.
+  return '(valore)';
 }
 
 /** JSON Pointer: `~` diventa `~0`, `/` diventa `~1`. Senza, i nomi con "/" si rompono. */

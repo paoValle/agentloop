@@ -10,11 +10,10 @@
 
 import { createHash } from 'node:crypto';
 
-import { SchemaViolationError, UnknownToolError } from './errors.js';
-import { assertSchemaSupported, validate } from './validate.js';
+import { SchemaViolationError } from './errors.js';
+import { assertSchemaSupported, describeTypes, validate } from './validate.js';
 import type { JsonSchema, ValidationError } from './schema.js';
-import type { Tool, ToolCall, ToolContext, ToolFailure, ToolSpec } from './types.js';
-import type { AnyTool } from './types.js';
+import type { AnyTool, ToolCall, ToolContext, ToolFailure, ToolSpec } from './types.js';
 
 /**
  * L'errore che un autore di tool scrive **per essere letto dal modello**.
@@ -123,7 +122,7 @@ export class ToolRegistry {
       .update('\0')
       .update(tool.description)
       .update('\0')
-      .update(JSON.stringify(tool.schema ?? null))
+      .update(JSON.stringify(tool.schema))
       .update('\0')
       .update(tool.execute.toString())
       .digest('hex')
@@ -255,7 +254,7 @@ export function schemaViolation(tool: string, errors: readonly ValidationError[]
 
 /** Rende leggibile uno schema in una riga, per i log. */
 export function describeSchema(schema: JsonSchema): string {
-  const type = schema.type === undefined ? 'qualsiasi' : schema.type;
+  const type = schema.type === undefined ? 'qualsiasi' : describeTypes(schema.type);
   const required = schema.required === undefined ? '' : `, obbligatori: ${schema.required.join(', ')}`;
   return `${type}${required}`;
 }

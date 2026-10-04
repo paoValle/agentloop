@@ -18,10 +18,10 @@
  * un servizio ormai cancellato.
  */
 
-import { Budget } from './budget.js';
+import { Budget, type Price } from './budget.js';
 import { ReplayMismatchError } from './errors.js';
 import { run, type RunOptions, type RunResult } from './loop.js';
-import { Trace, type TraceEvent, type ToolOutcomeTrace } from './trace.js';
+import { Trace, type ToolOutcomeTrace } from './trace.js';
 import { ReplayedFailure, ToolRegistry } from './tool.js';
 import type { AnyTool, Policy, PolicyOutcome } from './types.js';
 
@@ -89,7 +89,7 @@ export async function replay(
     stepAllowance: start.parameters.stepAllowance as never,
     // il prezzo è quello **risolto** nella run originale: ricalcolarlo con una tabella
     // diversa cambierebbe la spesa e il replay si fermerebbe a un passo diverso
-    prices: { [policy.model]: start.parameters.price },
+    prices: { [policy.model]: start.parameters.price as Price },
     trace: new Trace(),
     // stesso runId della run originale: il replay *è* quella run, non una nuova.
     // la provenienza del replay sta in ReplayResult, non dentro la traccia.
@@ -116,19 +116,21 @@ function recordedPolicy(original: Trace): Policy {
   return {
     // il modello è quello della prima risposta registrata: serve al prezzo
     model: risposte[0]?.model ?? 'registrato',
-    decide: async (): Promise<PolicyOutcome> => {
+    decide: (): Promise<PolicyOutcome> => {
       const risposta = risposte[indice++];
       if (risposta === undefined) {
-        throw new ReplayMismatchError(
-          indice - 1,
-          `la traccia ha ${risposte.length} risposte ma il replay ne ha chiesto ${indice}: il loop è cambiato`,
+        return Promise.reject(
+          new ReplayMismatchError(
+            indice - 1,
+            `la traccia ha ${risposte.length} risposte ma il replay ne ha chiesto ${indice}: il loop è cambiato`,
+          ),
         );
       }
-      return {
+      return Promise.resolve({
         decision: risposta.decision,
         usage: risposta.usage,
         model: risposta.model,
-      };
+      });
     },
   };
 }
