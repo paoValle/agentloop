@@ -102,6 +102,14 @@ export type AnyTool = Tool<never, unknown>;
 
 /** Il cervello: chi decide, a ogni passo. */
 export interface Policy {
+  /**
+   * Il modello che verrà interrogato.
+   *
+   * **Obbligatorio.** Il prezzo è ciò che trasforma un contatore di token in un
+   * tetto di spesa, e senza sapere quale modello risponde il budget non può fare il
+   * suo lavoro. Una Policy che non lo dichiara è un bug, non un caso limite.
+   */
+  readonly model: string;
   decide(request: DecideRequest): Promise<PolicyOutcome>;
 }
 
