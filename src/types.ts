@@ -87,6 +87,19 @@ export interface Tool<I = unknown, O = unknown> extends ToolSpec {
   readonly sensitive?: boolean;
 }
 
+/**
+ * Un tool con i tipi degli argomenti eroduti: è quello che il registro può contenere.
+ *
+ * `never` come parametro di ingresso è il trucco che rende il registro compatibile
+ * con tool tipizzati. In TypeScript i parametri sono in posizione controvariante:
+ * `Tool<{a: number}, number>` non è assegnabile a un registro che vuole
+ * `Tool<unknown, unknown>`, perché `execute` accetterebbe qualunque cosa. Con `never`
+ * la coerenza torna, perché `never` è assegnabile a ogni tipo: il registro rinuncia
+ * a sapere quali sono gli argomenti, che è esattamente il suo lavoro — la garanzia
+ * la dà lo schema, a runtime, dove conta.
+ */
+export type AnyTool = Tool<never, unknown>;
+
 /** Il cervello: chi decide, a ogni passo. */
 export interface Policy {
   decide(request: DecideRequest): Promise<PolicyOutcome>;
