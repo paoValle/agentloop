@@ -1,25 +1,25 @@
 # Changelog
 
-Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/),
-versioni [SemVer](https://semver.org/lang/it/).
+Format [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+versioning [SemVer](https://semver.org/).
 
-## [Non rilasciato]
+## [Unreleased]
 
 ## [0.1.0] - 2026-10-04
 
-Prima versione utilizzabile. Niente stabilità promossa: è un side project.
+First usable version. No stability promised: it is a side project.
 
-### Aggiunto
-- `run()`: il ciclo agentico, con budget a prenotazione e tetto di passi
-- `Budget`: prenotazione → saldo, importi interi in micro-dollari, `unlimited()`
-- `ToolRegistry`: nome, descrizione, schema e unicità verificati all'ingresso
-- validatore JSON Schema in un sottoinsieme dichiarato, con errori per JSON Pointer
-- `ToolError`: l'unico modo intenzionale di dire qualcosa al modello (ADR 0004)
-- `Trace`: eventi in sola aggiunta, JSONL, ridazione per tool sensibili, degradazione esplicita
-- `replay()`: tre modalità (`full`, `live-tools`, `dry-run`) e avviso se il tool è cambiato
-- `openAICompatible()`: adapter per endpoint chat compatibili con OpenAI
+### Added
+- `run()`: the agentic cycle, with reservation budget and step cap
+- `Budget`: reserve → settle, integer micro-dollar amounts, `unlimited()`
+- `ToolRegistry`: name, description, schema and uniqueness checked on the way in
+- JSON Schema validator over a declared subset, with JSON Pointer errors
+- `ToolError`: the only intentional way to say something to the model (ADR 0004)
+- `Trace`: append-only events, JSONL, redaction for sensitive tools, explicit degradation
+- `replay()`: three modes (`full`, `live-tools`, `dry-run`) and a warning if the tool changed
+- `openAICompatible()`: adapter for OpenAI-compatible chat endpoints
 
-### Note
-- Nessuna dipendenza runtime. Node ≥ 22.
-- Streaming, tool paralleli e multi-provider sono fuori perimetro: vedi
-  [RFC 0001](docs/rfc/0001-perimetro.md).
+### Notes
+- No runtime dependencies. Node ≥ 22.
+- Streaming, parallel tools and multi-provider are outside the perimeter: see
+  [RFC 0001](docs/rfc/0001-perimeter.md).

@@ -1,13 +1,13 @@
 /**
- * Errori tipizzati.
+ * Typed errors.
  *
- * Ogni errore che il runtime può produrre ha un tipo: `catch (e) { }` non deve
- * richiedere di andare a leggere il messaggio per capire cosa sia successo.
+ * Every error the runtime can produce has a type: `catch (e) { }` should not
+ * require reading the message to understand what happened.
  */
 
 import type { ValidationError } from './schema.js';
 
-/** Base di tutto ciò che può fallire dentro al runtime. */
+/** Base of everything that can fail inside the runtime. */
 export class AgentLoopError extends Error {
   constructor(message: string, options?: { cause?: unknown }) {
     super(message, options);
@@ -16,58 +16,56 @@ export class AgentLoopError extends Error {
 }
 
 /**
- * Il budget di denaro non copre più la chiamata.
+ * The money budget no longer covers the call.
  *
- * Non è un errore "da gestire": è il funzionamento corretto del budget. Il loop lo
- * intercetta, chiude il run con `stopReason: 'budget'` e restituisce un risultato
- * — solo se qualcuno lo usa direttamente fuori dal loop, diventa un'eccezione.
+ * This is not an error "to handle": it is the budget working correctly. The loop
+ * catches it, closes the run with `stopReason: 'budget'` and returns a result
+ * — it only becomes an exception if someone uses it directly outside the loop.
  */
 export class BudgetExceededError extends AgentLoopError {
   readonly requested: number;
   readonly available: number;
 
   constructor(requested: number, available: number) {
-    super(
-      `budget insufficiente: servono ${requested} µUSD, disponibili ${available} µUSD`,
-    );
+    super(`insufficient budget: ${requested} µUSD needed, ${available} µUSD available`);
     this.requested = requested;
     this.available = available;
   }
 }
 
-/** Gli argomenti prodotti dal modello non rispettano lo schema del tool. */
+/** The arguments produced by the model do not match the tool schema. */
 export class SchemaViolationError extends AgentLoopError {
   readonly errors: readonly ValidationError[];
 
   constructor(tool: string, errors: readonly ValidationError[]) {
-    super(`argomenti non validi per il tool "${tool}"`, { cause: errors });
+    super(`invalid arguments for tool "${tool}"`, { cause: errors });
     this.errors = errors;
   }
 }
 
-/** Il modello ha invocato un tool che non è registrato. */
+/** The model called a tool that is not registered. */
 export class UnknownToolError extends AgentLoopError {
   constructor(
     readonly requested: string,
     readonly available: readonly string[],
   ) {
     super(
-      `tool sconosciuto "${requested}". Disponibili: ${available.length > 0 ? available.join(', ') : '(nessuno)'}`,
+      `unknown tool "${requested}". Available: ${available.length > 0 ? available.join(', ') : '(none)'}`,
     );
   }
 }
 
-/** Il tool esiste, ha ricevuto argomenti validi, e ha comunque fallito. */
+/** The tool exists, received valid arguments, and failed anyway. */
 export class ToolExecutionError extends AgentLoopError {
   constructor(
     readonly tool: string,
     options?: { cause?: unknown },
   ) {
-    super(`il tool "${tool}" è fallito`, options);
+    super(`tool "${tool}" failed`, options);
   }
 }
 
-/** La `Policy` ha fallito: rete, rate limit, formato di risposta inatteso. */
+/** The `Policy` failed: network, rate limit, unexpected response shape. */
 export class PolicyError extends AgentLoopError {
   constructor(message: string, options?: { cause?: unknown }) {
     super(message, options);
@@ -75,10 +73,10 @@ export class PolicyError extends AgentLoopError {
 }
 
 /**
- * Lo schema contiene una parola chiave che questo validatore **non supporta**.
+ * The schema contains a keyword that this validator does **not support**.
  *
- * È un errore di sviluppo, non di input: deve esplodere quando lo schema viene
- * registrato, non quando un utente passa un argomento strano. Vedi ADR 0002.
+ * This is a development error, not an input error: it must blow up when the schema
+ * is registered, not when a user passes a weird argument. See ADR 0002.
  */
 export class UnsupportedSchemaKeywordError extends AgentLoopError {
   constructor(
@@ -86,17 +84,17 @@ export class UnsupportedSchemaKeywordError extends AgentLoopError {
     readonly path: string,
   ) {
     super(
-      `parola chiave JSON Schema non supportata: "${keyword}" in ${path}. ` +
-        `Vedi docs/adr/0002-validatore-json-schema.md per il sottoinsieme ammesso.`,
+      `unsupported JSON Schema keyword: "${keyword}" at ${path}. ` +
+        `See docs/adr/0002-json-schema-validator.md for the supported subset.`,
     );
   }
 }
 
 /**
- * Il replay non combacia con la traccia: evento atteso diverso da quello registrato.
+ * Replay does not match the trace: the expected event differs from the recorded one.
  *
- * Significa che il loop è stato modificato in un modo che invalida la riproduzione.
- * Non si "corregga": si capisce perché.
+ * It means the loop was changed in a way that invalidates reproduction.
+ * It is not "fixed": it is understood.
  */
 export class ReplayMismatchError extends AgentLoopError {
   constructor(

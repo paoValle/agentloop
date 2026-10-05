@@ -1,18 +1,18 @@
 /**
- * Validazione contro il sottoinsieme di JSON Schema.
+ * Validation against the JSON Schema subset.
  *
- * Due proprietà, e il resto sono conseguenze:
+ * Two properties, and the rest are consequences:
  *
- * 1. **Non lancia.** Restituisce la lista degli errori. Il destinatario naturale di
- *    questa lista è un modello che deve correggere i propri argomenti: un'eccezione
- *    con stack trace è uselesse per lui, un elenco di "campo, atteso, ricevuto" no.
- *    E per il chiamante umano, `validate()` è più comoda di un `try/catch` che
- *    devi ricordarti di mettere.
+ * 1. **It does not throw.** It returns the list of errors. The natural recipient of
+ *    this list is a model that has to fix its own arguments: an exception with a
+ *    stack trace is useless to it, a list of "field, expected, received" is not.
+ *    And for the human caller, `validate()` is more convenient than a `try/catch`
+ *    you have to remember to write.
  *
- * 2. **Tutti gli errori, non il primo.** Altrimenti un modello che sbaglia tre
- *    campi corregge uno, viene rifiutato, corregge un altro, e ci mette tre turni.
+ * 2. **All errors, not the first one.** Otherwise a model that gets three fields
+ *    wrong fixes one, is rejected, fixes another, and takes three turns.
  *
- * L'elenco delle parole chiave ammesse è in `SUPPORTED_KEYWORDS` (ADR 0002).
+ * The list of allowed keywords is in `SUPPORTED_KEYWORDS` (ADR 0002).
  */
 
 import { UnsupportedSchemaKeywordError } from './errors.js';
@@ -20,18 +20,18 @@ import type { JsonSchema, JsonSchemaType, ValidationError } from './schema.js';
 import { SUPPORTED_KEYWORDS } from './schema.js';
 
 /**
- * Controlla che uno schema usi solo parole chiave note.
+ * Checks that a schema uses only known keywords.
  *
- * Da chiamare **alla registrazione del tool**, non alla validazione: se uno schema
- * contiene `"pattern"` e noi lo ignoriamo in silenzio, il campo sembra validato e
- * non lo è. Un errore di sviluppo deve esplodere subito.
+ * Call it **when the tool is registered**, not when validating: if a schema contains
+ * `"pattern"` and we silently ignore it, the field looks validated and is not. A
+ * development error must blow up immediately.
  *
  * @throws {UnsupportedSchemaKeywordError}
  */
 export function assertSchemaSupported(schema: JsonSchema, path = '#'): void {
   const allowed = new Set<string>(SUPPORTED_KEYWORDS);
-  // Object.entries su un'interfaccia restituisce un'unione di tutti i tipi di campo:
-  // qui le righe sono `unknown` e ogni sotto-schema viene ricontrollato prima dell'uso.
+  // Object.entries on an interface returns a union of all field types: here the rows
+  // are `unknown` and every sub-schema is checked again before use.
   const entries: [string, unknown][] = Object.entries(schema);
 
   for (const [key, value] of entries) {
@@ -58,28 +58,28 @@ export function assertSchemaSupported(schema: JsonSchema, path = '#'): void {
 }
 
 /**
- * Valida `value` contro `schema`.
+ * Validates `value` against `schema`.
  *
- * @returns gli errori trovati, in ordine di profondità. Array vuoto = valido.
+ * @returns the errors found, in order of depth. Empty array = valid.
  */
 export function validate(schema: JsonSchema, value: unknown, path = ''): ValidationError[] {
   const errors: ValidationError[] = [];
 
-  // `enum` è più specifico di `type`: se il valore è nell'enum, il tipo è già a posto.
+  // `enum` is more specific than `type`: if the value is in the enum, the type is fine.
   if (schema.enum !== undefined && !schema.enum.some((candidate) => deepEqual(candidate, value))) {
     errors.push({
       path,
-      message: `atteso uno tra [${schema.enum.map(render).join(', ')}], ricevuto ${render(value)}`,
+      message: `expected one of [${schema.enum.map(render).join(', ')}], received ${render(value)}`,
     });
   }
 
   if (schema.type !== undefined && !matchesType(schema.type, value)) {
     errors.push({
       path,
-      message: `atteso ${describeTypes(schema.type)}, ricevuto ${describeValue(value)}`,
+      message: `expected ${describeTypes(schema.type)}, received ${describeValue(value)}`,
     });
-    // Il tipo non torna: scendere dentro un oggetto o un array non ha senso e
-    // produrrebbe cascate di errori fuorvianti.
+    // The type does not hold: descending into an object or an array makes no sense
+    // and would produce misleading cascades of errors.
     return errors;
   }
 
@@ -97,7 +97,7 @@ export function validate(schema: JsonSchema, value: unknown, path = ''): Validat
         .join('\n');
       errors.push({
         path,
-        message: `non corrisponde a nessuna delle ${alternative.length} forme ammesse:\n${branches}`,
+        message: `does not match any of the ${alternative.length} allowed shapes:\n${branches}`,
       });
     }
   }
@@ -116,14 +116,14 @@ function validateString(
   path: string,
   errors: ValidationError[],
 ): void {
-  // Lunghezza in punti di codice, non in unità UTF-16: "👨‍👩‍👧" è 1 carattere per
-  // chi lo legge e 5 per String.length. La validazione deve seguire la percezione.
+  // Length in code points, not in UTF-16 units: "👨‍👩‍👧" is 1 character for the
+  // reader and 5 for String.length. Validation must follow perception.
   const length = [...value].length;
   if (schema.minLength !== undefined && length < schema.minLength) {
-    errors.push({ path, message: `attesta almeno ${schema.minLength} caratteri, ne ha ${length}` });
+    errors.push({ path, message: `expected at least ${schema.minLength} characters, got ${length}` });
   }
   if (schema.maxLength !== undefined && length > schema.maxLength) {
-    errors.push({ path, message: `attesta al massimo ${schema.maxLength} caratteri, ne ha ${length}` });
+    errors.push({ path, message: `expected at most ${schema.maxLength} characters, got ${length}` });
   }
 }
 
@@ -134,10 +134,10 @@ function validateNumber(
   errors: ValidationError[],
 ): void {
   if (schema.minimum !== undefined && value < schema.minimum) {
-    errors.push({ path, message: `atteso un numero >= ${schema.minimum}, ricevuto ${value}` });
+    errors.push({ path, message: `expected a number >= ${schema.minimum}, received ${value}` });
   }
   if (schema.maximum !== undefined && value > schema.maximum) {
-    errors.push({ path, message: `atteso un numero <= ${schema.maximum}, ricevuto ${value}` });
+    errors.push({ path, message: `expected a number <= ${schema.maximum}, received ${value}` });
   }
 }
 
@@ -148,10 +148,10 @@ function validateArray(
   errors: ValidationError[],
 ): void {
   if (schema.minItems !== undefined && value.length < schema.minItems) {
-    errors.push({ path, message: `attesi almeno ${schema.minItems} elementi, ne ha ${value.length}` });
+    errors.push({ path, message: `expected at least ${schema.minItems} elements, got ${value.length}` });
   }
   if (schema.maxItems !== undefined && value.length > schema.maxItems) {
-    errors.push({ path, message: `attesi al massimo ${schema.maxItems} elementi, ne ha ${value.length}` });
+    errors.push({ path, message: `expected at most ${schema.maxItems} elements, got ${value.length}` });
   }
   if (schema.items === undefined) return;
 
@@ -168,7 +168,7 @@ function validateObject(
 ): void {
   for (const name of schema.required ?? []) {
     if (!Object.hasOwn(value, name)) {
-      errors.push({ path: `${path}/${escapePointer(name)}`, message: 'campo obbligatorio mancante' });
+      errors.push({ path: `${path}/${escapePointer(name)}`, message: 'required field is missing' });
     }
   }
 
@@ -183,13 +183,13 @@ function validateObject(
     for (const name of extra) {
       errors.push({
         path: `${path}/${escapePointer(name)}`,
-        message: `campo non previsto${Object.keys(properties).length > 0 ? ` (previsti: ${Object.keys(properties).join(', ')})` : ''}`,
+        message: `unexpected field${Object.keys(properties).length > 0 ? ` (allowed: ${Object.keys(properties).join(', ')})` : ''}`,
       });
     }
   }
 }
 
-/** Confronta due valori JSON per struttura. Serve a `enum` e a `anyOf`. */
+/** Compares two JSON values structurally. Used by `enum` and `anyOf`. */
 export function deepEqual(a: unknown, b: unknown): boolean {
   if (Object.is(a, b)) return true;
   if (typeof a !== typeof b || a === null || b === null) return false;
@@ -234,22 +234,22 @@ function matchesSingleType(type: JsonSchemaType, value: unknown): boolean {
   }
 }
 
-/** Nome leggibile di uno o più tipi attesi: `['string','null']` → `string o null`. */
+/** Readable name of one or more expected types: `['string','null']` → `string or null`. */
 export function describeTypes(type: JsonSchema['type']): string {
-  return Array.isArray(type) ? type.join(' o ') : String(type);
+  return Array.isArray(type) ? type.join(' or ') : String(type);
 }
 
-/** Descrizione leggibile del valore: distingue `[]`, `{}`, `null` e `NaN`. */
+/** Readable description of the value: it distinguishes `[]`, `{}`, `null` and `NaN`. */
 export function describeValue(value: unknown): string {
   if (value === null) return 'null';
-  if (Array.isArray(value)) return `un array di ${value.length} elementi`;
+  if (Array.isArray(value)) return `an array of ${value.length} elements`;
   if (typeof value === 'number' && Number.isNaN(value)) return 'NaN';
-  if (typeof value === 'object') return 'un oggetto';
-  if (typeof value === 'string') return `la stringa ${render(value)}`;
+  if (typeof value === 'object') return 'an object';
+  if (typeof value === 'string') return `the string ${render(value)}`;
   return `${typeof value} ${render(value)}`;
 }
 
-/** Rappresentazione breve e non ambigua, per i messaggi di errore. */
+/** Short and unambiguous representation, for error messages. */
 function render(value: unknown): string {
   if (value === null) return 'null';
   if (typeof value === 'string') return JSON.stringify(value);
@@ -267,17 +267,17 @@ function render(value: unknown): string {
     case 'undefined':
       return 'undefined';
     case 'function':
-      return `[funzione ${value.name === '' ? 'anonima' : value.name}]`;
+      return `[function ${value.name === '' ? 'anonymous' : value.name}]`;
     case 'object':
     case 'string':
-      return '(valore)';
+      return '(value)';
   }
-  // TypeScript non può sapere che i casi sopra sono già coperti dai controlli in
-  // testa alla funzione; senza questo return la firma non è soddisfacibile.
-  return '(valore)';
+  // TypeScript cannot know that the cases above are already covered by the checks at
+  // the top of the function; without this return the signature is not satisfiable.
+  return '(value)';
 }
 
-/** JSON Pointer: `~` diventa `~0`, `/` diventa `~1`. Senza, i nomi con "/" si rompono. */
+/** JSON Pointer: `~` becomes `~0`, `/` becomes `~1`. Without it, names with "/" break. */
 function escapePointer(segment: string): string {
   return segment.replaceAll('~', '~0').replaceAll('/', '~1');
 }

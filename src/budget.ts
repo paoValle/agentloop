@@ -1,79 +1,77 @@
 /**
- * Il budget: quanti soldi può spendere questo run, e come fa a non spenderne di più.
+ * The budget: how much money this run may spend, and how it avoids spending more.
  *
- * Il problema che risolve è una domanda operativa, non accademica: un agentic loop
- * che chiama un tool che a sua volta chiama un provider a pagamento può, in teoria,
- * continuare a farlo finché non esaurisce la carta. Un budget che si verifica **dopo**
- * la chiamata è già troppo tardi: il denaro è andato.
+ * The problem it solves is an operational question, not an academic one: an agentic
+ * loop that calls a tool which in turn calls a paid provider can, in theory, keep
+ * doing that until the card is empty. A budget checked **after** the call is already
+ * too late: the money is gone.
  *
- * Per questo il modello è **prenota → salda**:
+ * That is why the model is **reserve → settle**:
  *
- *   1. `reserve(estimate)` blocca subito la somma stimata. Se non entra nel
- *      budget, la decisione non viene neppure eseguita e non costa nulla.
- *   2. la chiamata avviene davvero.
- *   3. `settle(handle, actual)` sostituisce la stima con il consumo reale, e
- *      libera il resto.
+ *   1. `reserve(estimate)` locks the estimated amount right away. If it does not fit
+ *      the budget, the decision is not even executed and costs nothing.
+ *   2. the call actually happens.
+ *   3. `settle(handle, actual)` replaces the estimate with the real consumption, and
+ *      releases the rest.
  *
- * In questo modo il tetto vale **davanti** alla spesa, non dopo.
+ * This way the cap holds **in front of** the spend, not after it.
  *
- * I soldi sono interi in **micro-dollari** (µUSD). Nessun `float`: `0.1 + 0.2 !== 0.3`
- * e su un fatturato la differenza è un buco. Vedi il riquadro in fondo.
+ * Money is integer **micro-dollars** (µUSD). No `float`: `0.1 + 0.2 !== 0.3`
+ * and on an invoice the difference is a hole.
  */
 
 import { BudgetExceededError } from './errors.js';
 import type { Usage } from './types.js';
 
-/** Un dollaro, in micro-dollari. */
+/** One dollar, in micro-dollars. */
 export const MICRO_USD_PER_USD = 1_000_000;
 
-/** Token in un milione: l'unità in cui i prezzi vengono pubblicati. */
+/** Tokens in a million: the unit prices are published in. */
 const TOKENS_PER_PRICE_UNIT = 1_000_000;
 
 /**
- * Un importo in micro-dollari. Tipo marchiato: non è un numero qualsiasi.
+ * An amount in micro-dollars. Branded type: it is not just any number.
  *
- * Il marchio ha una proprietà **obbligatoria**: è ciò che rende `number` non
- * assegnabile a `MicroUsd`. Con una proprietà opzionale il tipo non marcherebbe
- * niente — `number` resterebbe compatibile e il bug che si vuole prevenire
- * (passare dollari dove si aspettavano micro-dollari, errore di 10⁶) tornerebbe
- * esattamente uguale.
+ * The brand has a **required** property: that is what makes `number` non-assignable
+ * to `MicroUsd`. With an optional property the type would brand nothing — `number`
+ * would stay compatible and the bug it is meant to prevent (passing dollars where
+ * micro-dollars were expected, an error of 10⁶) would come back exactly the same.
  */
 export type MicroUsd = number & { readonly __unit: 'MicroUsd' };
 
-/** Costruisce un `MicroUsd` da dollari (`0.25` → `250_000` µUSD). */
+/** Builds a `MicroUsd` from dollars (`0.25` → `250_000` µUSD). */
 export function usd(amount: number): MicroUsd {
   return assertNonNegativeFinite(amount * MICRO_USD_PER_USD) as MicroUsd;
 }
 
-/** Costruisce un `MicroUsd` da micro-dollari già espressi. */
+/** Builds a `MicroUsd` from micro-dollars already expressed. */
 export function micros(amount: number): MicroUsd {
   return assertNonNegativeFinite(amount) as MicroUsd;
 }
 
-/** Formatta per la traccia e per i log: `0.001234`. */
+/** Formats for the trace and for logs: `0.001234`. */
 export function formatUsd(value: MicroUsd): string {
   return (value / MICRO_USD_PER_USD).toFixed(6);
 }
 
-/** Prezzo di un modello, in µUSD per milione di token. */
+/** Price of a model, in µUSD per million tokens. */
 export interface Price {
   readonly input: MicroUsd;
   readonly output: MicroUsd;
 }
 
-/** Tabella dei prezzi indicati per modello: `{'gpt-4o': { input, output }, ...}`. */
+/** Price table indexed by model: `{'gpt-4o': { input, output }, ...}`. */
 export type PriceTable = Readonly<Record<string, Price>>;
 
-/** Il prezzo di un modello esplicitamente dichiarato dal chiamante. */
+/** The price of a model not explicitly declared by the caller. */
 export const UNKNOWN_MODEL: Price = { input: micros(0), output: micros(0) };
 
 /**
- * Costo di una chiamata, in µUSD, **arrotondato per eccesso**.
+ * Cost of a call, in µUSD, **rounded up**.
  *
- * L'arrotondamento è deliberato: se si arrotondasse all'ultimo, il tetto di budget
- * potrebbe essere scavalcato dalla somma di tanti arrotondamenti per difetto. Un
- * errore di una unità di micro-dollari a favore del sistema costa meno di una
- * fattura che nessuno riesce a spiegare.
+ * The rounding is deliberate: rounding to the nearest unit would let the budget cap
+ * be bypassed by the sum of many roundings down. A one micro-dollar error in the
+ * system's favor costs less than an invoice nobody can explain.
  */
 export function costOf(usage: Usage, price: Price): MicroUsd {
   const { inputTokens, outputTokens } = usage;
@@ -86,20 +84,20 @@ export function costOf(usage: Usage, price: Price): MicroUsd {
 }
 
 /**
- * Una prenotazione. Va **sempre** saldata o liberata: una prenotazione dimenticata
- * blocca budget per il resto del run.
+ * A reservation. It must **always** be settled or released: a forgotten reservation
+ * locks budget for the rest of the run.
  */
 export interface Reservation {
   readonly id: number;
-  /** Somma bloccata, in µUSD. */
+  /** Locked amount, in µUSD. */
   readonly amount: MicroUsd;
 }
 
 /**
- * Il tetto di spesa di un run.
+ * The spending cap of a run.
  *
- * Istanza singola per run. Non è pensato per essere condiviso: la concorrenza su un
- * budget condiviso è un problema di distributed systems, non di una libreria.
+ * One instance per run. It is not meant to be shared: concurrency on a shared budget
+ * is a distributed systems problem, not a library one.
  */
 export class Budget {
   #limit: MicroUsd;
@@ -113,50 +111,50 @@ export class Budget {
   }
 
   /**
-   * Un tetto che in pratica non esiste, dichiarato apertamente.
+   * A cap that in practice does not exist, declared openly.
    *
-   * Serve a due cose: ai test, che non hanno bisogno di fare i conti, e a chi *sa*
-   * che il run è economico. Il punto è che sia una **scelta** e non un default:
-   * `budget: new Budget(...)` rende la decisione leggibile in ogni diff.
+   * It serves two purposes: tests, which do not need to do the math, and whoever
+   * *knows* the run is cheap. The point is that it is a **choice** and not a default:
+   * `budget: new Budget(...)` makes the decision readable in every diff.
    */
   static unlimited(): Budget {
     return new Budget(Number.MAX_SAFE_INTEGER as MicroUsd);
   }
 
-  /** Il tetto. */
+  /** The cap. */
   get limit(): MicroUsd {
     return this.#limit;
   }
 
-  /** Denaro effettivamente speso finora (esclude le prenotazioni aperte). */
+  /** Money actually spent so far (excludes open reservations). */
   get spent(): MicroUsd {
     return this.#committed;
   }
 
-  /** Denaro attualmente bloccato da prenotazioni aperte. */
+  /** Money currently locked by open reservations. */
   get held(): MicroUsd {
     return this.#reserved;
   }
 
-  /** Quanto si può ancora prenotare: tetto meno speso meno bloccato. */
+  /** How much can still be reserved: cap minus spent minus held. */
   get available(): MicroUsd {
     return (this.#limit - this.#committed - this.#reserved) as MicroUsd;
   }
 
-  /** Prenotazioni ancora da saldare. Se resta una a metà run, è un bug. */
+  /** Reservations still to be settled. If one is left mid-run, it is a bug. */
   get openReservations(): readonly number[] {
     return [...this.#open.keys()];
   }
 
-  /** `true` se la somma entra nel budget residuo. Non prenota nulla. */
+  /** `true` if the amount fits the remaining budget. Reserves nothing. */
   canAfford(amount: MicroUsd): boolean {
     return amount <= this.available;
   }
 
   /**
-   * Blocca `amount` e restituisce la prenotazione.
+   * Locks `amount` and returns the reservation.
    *
-   * @throws {BudgetExceededError} se non entra nel residuo. **Prima** di spendere.
+   * @throws {BudgetExceededError} if it does not fit the remainder. **Before** spending.
    */
   reserve(amount: MicroUsd): Reservation {
     const value = assertNonNegativeFinite(amount) as MicroUsd;
@@ -170,11 +168,11 @@ export class Budget {
   }
 
   /**
-   * Salda la prenotazione con il consumo reale.
+   * Settles the reservation with the real consumption.
    *
-   * Se il reale supera lo stimato, il debito resta intero: si può andare leggermente
-   * oltre il tetto (i prezzi cambiano fra un preventivo e la fattura) ma non di una
-   * somba, e soprattutto non di un ordine di grandezza.
+   * If the real amount exceeds the estimate, the debt stays whole: the cap can be
+   * exceeded slightly (prices change between a quote and an invoice) but not by an
+   * order of magnitude.
    */
   settle(reservation: Reservation, actual: MicroUsd): void {
     const held = this.#take(reservation);
@@ -183,13 +181,13 @@ export class Budget {
     this.#committed = (this.#committed + value) as MicroUsd;
   }
 
-  /** Rilascia la prenotazione senza spendere: la stima si è rivelata sovrastimata. */
+  /** Releases the reservation without spending: the estimate turned out too high. */
   release(reservation: Reservation): void {
     const held = this.#take(reservation);
     this.#reserved = (this.#reserved - held) as MicroUsd;
   }
 
-  /** Dettaglio per traccia e log. */
+  /** Detail for trace and logs. */
   snapshot(): { limit: MicroUsd; spent: MicroUsd; held: MicroUsd; available: MicroUsd } {
     return {
       limit: this.limit,
@@ -203,7 +201,7 @@ export class Budget {
     const held = this.#open.get(reservation.id);
     if (held === undefined) {
       throw new Error(
-        `prenotazione ${reservation.id} già saldata o liberata: una prenotazione si tocca una volta sola`,
+        `reservation ${reservation.id} already settled or released: a reservation is touched once only`,
       );
     }
     this.#open.delete(reservation.id);
@@ -213,10 +211,10 @@ export class Budget {
 
 function assertNonNegativeFinite(value: number): number {
   if (!Number.isFinite(value)) {
-    throw new TypeError(`atteso un numero finito, ricevuto ${String(value)}`);
+    throw new TypeError(`expected a finite number, received ${String(value)}`);
   }
   if (value < 0) {
-    throw new RangeError(`atteso un valore non negativo, ricevuto ${value}`);
+    throw new RangeError(`expected a non-negative value, received ${value}`);
   }
   return value;
 }

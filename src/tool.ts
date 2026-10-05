@@ -1,11 +1,11 @@
 /**
- * Il registro dei tool: chi esiste, con che contratto, e come si chiama.
+ * The tool registry: who exists, under which contract, and what it is called.
  *
- * Un tool è la superficie che un modello può toccare. È il posto dove sbaglia di
- * più e quello dove uno sbaglio costa di più, quindi tutto ciò che può essere
- * controllato **all'ingresso** viene controllato all'ingresso: schema non supportato,
- * nome non utilizzabile, descrizione vuota, duplicati. Un errore di registrazione è
- * un bug di sviluppo e deve fermare il processo subito.
+ * A tool is the surface a model can touch. It is where a model gets things wrong the
+ * most and where a mistake costs the most, so everything that can be checked **on the
+ * way in** is checked on the way in: unsupported schema, unusable name, empty
+ * description, duplicates. A registration error is a development bug and must stop
+ * the process immediately.
  */
 
 import { createHash } from 'node:crypto';
@@ -16,16 +16,16 @@ import type { JsonSchema, ValidationError } from './schema.js';
 import type { AnyTool, ToolCall, ToolContext, ToolFailure, ToolSpec } from './types.js';
 
 /**
- * L'errore che un autore di tool scrive **per essere letto dal modello**.
+ * The error a tool author writes **to be read by the model**.
  *
- * Se il tuo tool può fallire per un motivo che il modello può capire e correggere,
- * lancia `ToolError` con un messaggio in chiaro. Qualsiasi altro errore viene
- * ridotto a un messaggio neutro dal runtime (vedi ADR 0004).
+ * If your tool can fail for a reason the model can understand and fix, throw
+ * `ToolError` with a plain message. Any other error is reduced to a neutral message
+ * by the runtime (see ADR 0004).
  */
 export class ToolError extends Error {
   constructor(
     message: string,
-    /** `true` se riprovare gli stessi argomenti ha una chance di funzionare. */
+    /** `true` if retrying the same arguments has a chance of working. */
     readonly retryable = false,
     options?: { cause?: unknown },
   ) {
@@ -34,19 +34,19 @@ export class ToolError extends Error {
   }
 }
 
-/** Un tool che è andato a buon fine, o il motivo per cui non è andato. */
+/** A tool that succeeded, or the reason why it did not. */
 export type ToolOutcome =
   | { readonly ok: true; readonly output: unknown }
   | { readonly ok: false; readonly failure: ToolFailure };
 
 /**
- * I nomi dei tool diventano nomi di funzione nel codice generato e nei log.
- * Restringerli è gratis e toglie una classe di problemi: nomi con spazi,
- * con punti, o che iniziano con un numero.
+ * Tool names become function names in generated code and in logs.
+ * Restricting them is free and removes a class of problems: names with spaces,
+ * with dots, or starting with a digit.
  */
 const TOOL_NAME = /^[a-zA-Z_][a-zA-Z0-9_]{0,63}$/;
 
-/** I tool registrati, indicizzati per nome. */
+/** The registered tools, indexed by name. */
 export class ToolRegistry {
   readonly #tools = new Map<string, AnyTool>();
 
@@ -54,25 +54,25 @@ export class ToolRegistry {
     for (const tool of tools) this.add(tool);
   }
 
-  /** Registra un tool. Restituisce `this`, così si può concatenare in costruzione. */
+  /** Registers a tool. Returns `this`, so it can be chained while building. */
   add(tool: AnyTool): this {
     const { name, description, schema } = tool;
 
     if (!TOOL_NAME.test(name)) {
       throw new TypeError(
-        `nome di tool non valido: "${name}". Attesi lettere, cifre e underscore, ` +
-          `iniziali non numeriche, massimo 64 caratteri.`,
+        `invalid tool name: "${name}". Expected letters, digits and underscores, ` +
+          `not starting with a digit, at most 64 characters.`,
       );
     }
     if (description.trim() === '') {
-      throw new TypeError(`il tool "${name}" ha una descrizione vuota: il modello non ha nulla su cui basarsi`);
+      throw new TypeError(`tool "${name}" has an empty description: the model has nothing to go on`);
     }
     if (this.#tools.has(name)) {
-      throw new Error(`tool duplicato: "${name}" è già registrato`);
+      throw new Error(`duplicate tool: "${name}" is already registered`);
     }
 
-    // prima che il tool diventi raggiungibile: uno schema con una parola chiave
-    // non supportata deve fermare l'avvio, non fallire a runtime su un input reale
+    // before the tool becomes reachable: a schema with an unsupported keyword must
+    // stop startup, not fail at runtime on a real input
     assertSchemaSupported(schema);
 
     this.#tools.set(name, tool);
@@ -95,7 +95,7 @@ export class ToolRegistry {
     return [...this.#tools.keys()].sort();
   }
 
-  /** Le descrizioni da mandare al modello. Non contiene codice eseguibile. */
+  /** The descriptions to send to the model. Contains no executable code. */
   specs(): ToolSpec[] {
     return this.names().map((name) => {
       const { description, schema } = this.#tools.get(name) as AnyTool;
@@ -104,15 +104,15 @@ export class ToolRegistry {
   }
 
   /**
-   * Impronta del codice di un tool: nome, descrizione, schema e sorgente della
-   * funzione `execute`.
+   * Fingerprint of a tool's code: name, description, schema and the source of the
+   * `execute` function.
    *
-   * Serve al replay (ADR 0003): se il tool è cambiato, i risultati registrati non
-   * descrivono più il suo comportamento, e il replay deve dirlo invece di fingere.
+   * Used by replay (ADR 0003): if the tool changed, the recorded results no longer
+   * describe its behavior, and replay must say so instead of pretending.
    *
-   * Limite noto: copre il corpo della funzione, non gli helper che importa. Un
-   * cambiamento dentro un helper non invalida la traccia. È accettato: il costo di
-   * un hash del grafo di import finisce per essere più alto del beneficio.
+   * Known limit: it covers the function body, not the helpers it imports. A change
+   * inside a helper does not invalidate the trace. That is accepted: the cost of
+   * hashing the import graph ends up higher than the benefit.
    */
   fingerprint(name: string): string | undefined {
     const tool = this.#tools.get(name);
@@ -131,12 +131,11 @@ export class ToolRegistry {
 }
 
 /**
- * Chiama un tool passando da tutte le verifiche, e **non lancia mai**.
+ * Calls a tool through every check, and **never throws**.
  *
- * Ogni fallimento diventa un `ToolFailure` con un messaggio scritto perché un
- * modello lo legga e lo corregga. Un'eccezione che esce da qui verso il loop
- * significherebbe che un agente ha fatto esplodere il processo: il fallimento di
- * un tool è un evento ordinario del run, non un incidente.
+ * Every failure becomes a `ToolFailure` with a message written so a model reads it
+ * and fixes itself. An exception escaping from here towards the loop would mean an
+ * agent blew up the process: a tool failure is an ordinary run event, not an incident.
  */
 export async function invokeTool(
   registry: ToolRegistry,
@@ -171,7 +170,7 @@ export async function invokeTool(
     return { ok: true, output };
   } catch (error) {
     if (ctx.signal?.aborted === true) {
-      // cancellazione: non è un errore del tool, e il loop non deve autocorreggere
+      // cancellation: not a tool error, and the loop must not self-correct
       throw error;
     }
     return { ok: false, failure: describeFailure(tool.name, error) };
@@ -179,14 +178,14 @@ export async function invokeTool(
 }
 
 /**
- * Errore interno: il messaggio da rimettere nel contesto è **già deciso**.
+ * Internal error: the message to put back into the context is **already decided**.
  *
- * Serve solo al replay (ADR 0003). Un tool che nella run originale è fallito con un
- * errore interno ha già prodotto un messaggio neutro; per rifare la stessa run non si
- * può rieseguire il codice del tool e ricostruire l'errore, quindi si conserva il
- * `ToolFailure` per intero — messaggio e `detail` — e lo si reinietta. Non è un
- * `ToolError`: la sua descrizione passerebbe per la regola di ADR 0004, aggiungerebbe
- * il suffisso di riprova e perderebbe il `detail`.
+ * Only used by replay (ADR 0003). A tool that in the original run failed with an
+ * internal error already produced a neutral message; to redo the same run you cannot
+ * re-execute the tool code and rebuild the error, so the whole `ToolFailure` —
+ * message and `detail` — is kept and re-injected. It is not a `ToolError`: its
+ * description would go through the ADR 0004 rule, add the retry suffix and lose the
+ * `detail`.
  *
  * @internal
  */
@@ -197,64 +196,64 @@ export class ReplayedFailure extends Error {
   }
 }
 
-/** Traduce un'eccezione in un `ToolFailure`, applicando ADR 0004. */
+/** Turns an exception into a `ToolFailure`, applying ADR 0004. */
 function describeFailure(tool: string, error: unknown): ToolFailure {
-  // prima di tutto: il replay riproduce il fallimento già deciso, struttura compresa
+  // first of all: replay reproduces the failure already decided, structure included
   if (error instanceof ReplayedFailure) {
     return error.failure;
   }
 
   if (error instanceof ToolError) {
     const retry = error.retryable
-      ? 'Puoi riprovare con gli stessi argomenti.'
-      : 'Correggi la causa prima di riprovare.';
+      ? 'You can retry with the same arguments.'
+      : 'Fix the cause before retrying.';
     return { kind: 'execution_failed', message: `${error.message} ${retry}`, detail: { retryable: error.retryable } };
   }
 
-  // errore non previsto: al modello non si mostra niente del contenuto, solo un
-  // riferimento. La causa vera è in traccia.
+  // unexpected error: nothing of the content is shown to the model, only a
+  // reference. The real cause is in the trace.
   return {
     kind: 'execution_failed',
     message:
-      `Il tool "${tool}" è fallito con un errore interno (vedi la traccia per la causa). ` +
-      `Non riprovare più di una volta con gli stessi argomenti; se fallisce ancora, ` +
-      `dillo all'utente e proponi un percorso alternativo.`,
+      `Tool "${tool}" failed with an internal error (see the trace for the cause). ` +
+      `Do not retry more than once with the same arguments; if it fails again, ` +
+      `tell the user and propose an alternative path.`,
   };
 }
 
 /**
- * Il messaggio per un set di errori di validazione.
+ * The message for a set of validation errors.
  *
- * Formato scelto perché il modello possa **citare il campo** e sapere cosa
- * correggere: un messaggio piatto ("input non valido") non gli dà niente su cui
- * lavorare, e il ciclo di autocorrezione si allunga.
+ * Format chosen so the model can **quote the field** and know what to fix: a flat
+ * message ("invalid input") gives it nothing to work with, and the self-correction
+ * loop gets longer.
  */
 export function invalidArgumentsMessage(tool: string, errors: readonly ValidationError[]): string {
   const lines = errors
-    .map((error) => `  - ${error.path === '' ? '<argomenti>' : error.path}: ${error.message}`)
+    .map((error) => `  - ${error.path === '' ? '<arguments>' : error.path}: ${error.message}`)
     .join('\n');
   return (
-    `Gli argomenti per "${tool}" non sono validi (${errors.length} problemi):\n${lines}\n` +
-    `Correggi solo i campi indicati e richiama "${tool}".`
+    `The arguments for "${tool}" are not valid (${errors.length} problems):\n${lines}\n` +
+    `Fix only the fields listed and call "${tool}" again.`
   );
 }
 
 function unknownToolMessage(requested: string, available: readonly string[]): string {
-  const list = available.length > 0 ? available.join(', ') : '(nessun tool registrato)';
+  const list = available.length > 0 ? available.join(', ') : '(no registered tools)';
   return (
-    `Il tool "${requested}" non esiste. I tool disponibili sono: ${list}. ` +
-    `Usa solo questi nomi.`
+    `Tool "${requested}" does not exist. The available tools are: ${list}. ` +
+    `Use only these names.`
   );
 }
 
-/** Costruisce un `SchemaViolationError` a partire dagli errori: per chi preferisce l'eccezione. */
+/** Builds a `SchemaViolationError` from the errors: for whoever prefers the exception. */
 export function schemaViolation(tool: string, errors: readonly ValidationError[]): SchemaViolationError {
   return new SchemaViolationError(tool, errors);
 }
 
-/** Rende leggibile uno schema in una riga, per i log. */
+/** Renders a schema in one readable line, for logs. */
 export function describeSchema(schema: JsonSchema): string {
-  const type = schema.type === undefined ? 'qualsiasi' : describeTypes(schema.type);
-  const required = schema.required === undefined ? '' : `, obbligatori: ${schema.required.join(', ')}`;
+  const type = schema.type === undefined ? 'any' : describeTypes(schema.type);
+  const required = schema.required === undefined ? '' : `, required: ${schema.required.join(', ')}`;
   return `${type}${required}`;
 }

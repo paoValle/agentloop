@@ -1,208 +1,208 @@
 # agentloop
 
-> Un runtime agentico piccolo e leggibile. Quattro cose: loop, tool, budget, replay.
+> A small and readable agentic runtime. Four things: loop, tools, budget, replay.
 
 ```ts
 import { Budget, ToolRegistry, openAICompatible, run, usd } from 'agentloop';
 
 const result = await run({
   policy: openAICompatible({ model: 'gpt-4o-mini', apiKey: process.env.OPENAI_API_KEY! }),
-  tools: new ToolRegistry([cercaVoli]),
-  messages: [{ role: 'user', content: 'Quanto costa il volo più economico da Napoli a Roma?' }],
-  budget: new Budget(usd(0.15)),   // obbligatorio: vedi sotto
+  tools: new ToolRegistry([searchFlights]),
+  messages: [{ role: 'user', content: 'How much does the cheapest flight from Naples to Rome cost?' }],
+  budget: new Budget(usd(0.15)),   // required: see below
 });
 
-result.answer;      // "Il più economico è Wizz a 41 euro."
+result.answer;      // "The cheapest is Wizz at 41 euros."
 result.stopReason;  // 'end_turn'
-result.spent;       // 0.000214 (µUSD: interi, mai float)
-result.trace;       // la traccia, da cui il run si rifà
+result.spent;       // 0.000214 (µUSD: integers, never float)
+result.trace;       // the trace, from which the run is redone
 ```
 
-Zero dipendenze runtime. Node ≥ 22.
+Zero runtime dependencies. Node ≥ 22.
 
 ---
 
-## Il problema
+## The problem
 
-I framework agentici più diffusi risolvono tre cose insieme — il loop, le chiamate al
-provider, e un sacco di comodità — e il risultato è che **il loop, che è la parte
-difficile, si legge solo leggendo il sorgente del framework**.
+The most widespread agentic frameworks solve three things at once — the loop, the calls
+to the provider, and a lot of convenience — and the result is that **the loop, which is
+the hard part, can only be read by reading the framework's source**.
 
-Un runtime agentico dovrebbe poter rispondere a quattro domande senza fatica:
+An agentic runtime should be able to answer four questions without effort:
 
-1. **Quanto costa questo run, adesso?** Non alla fine: *adesso*.
-2. **Cosa è successo?** Non un log: una traccia su cui si può scrivere una prova.
-3. **Questo run è rifacibile?**
-4. **L'agente ha passato gli argomenti giusti al tool?** Li ha sbagliati almeno una volta.
+1. **How much does this run cost, right now?** Not at the end: *right now*.
+2. **What happened?** Not a log: a trace you can write a test against.
+3. **Can this run be redone?**
+4. **Did the agent pass the right arguments to the tool?** It got them wrong at least once.
 
-Sono queste quattro, non il numero di feature, la differenza fra un prototipo e qualcosa
-che gira in produzione.
+It is these four, not the number of features, that make the difference between a
+prototype and something that runs in production.
 
-## Cosa fa
+## What it does
 
-- **Loop dichiarativo.** Stato in ingresso, eventi in uscita. Ogni effetto — chiamare un
-  provider, eseguire un tool — passa da un'interfaccia.
-- **Tool con input validato da JSON Schema.** Gli argomenti sbagliati non raggiungono il
-  codice, e l'errore torna al modello in forma leggibile perché se lo corregga.
-- **Budget con prenotazione.** Si stima prima, si salda dopo. Il tetto vale **davanti**
-  alla spesa, non dopo.
-- **Traccia append-only in JSONL.** Con ridazione dichiarata per i tool sensibili.
-- **Replay deterministico.** Da una traccia si rifà un run senza toccare la rete.
+- **Declarative loop.** State in, events out. Every effect — calling a provider,
+  executing a tool — goes through an interface.
+- **Tools with input validated by JSON Schema.** Wrong arguments never reach the code,
+  and the error goes back to the model in readable form so it can fix itself.
+- **Budget with reservation.** Estimate first, settle after. The cap holds **in front
+  of** the spend, not after it.
+- **Append-only trace in JSONL.** With redaction declared for sensitive tools.
+- **Deterministic replay.** A run is redone from a trace without touching the network.
 
-## Cosa NON fa
+## What it does NOT do
 
-| Non fa | Perché no |
+| It does not do | Why not |
 |---|---|
-| Streaming token-per-token | costa complessità stateful che qui non serve. È il primo candidato quando serve davvero |
-| Routing multi-provider, retry, cache | è il compito di [`llmgateway`](../llmgateway) |
-| Tool call parallele | rende il riordino degli eventi non deterministico |
-| Persistenza, memoria a lungo termine | un runtime senza stato proprio si riusa ovunque |
-| UI, logging strutturato, telemetria | non è una libreria di servizio: metti i tuoi adapter |
+| Token-by-token streaming | it costs stateful complexity that is not needed here. It is the first candidate when it is really needed |
+| Multi-provider routing, retries, caching | that is the job of [`llmgateway`](../llmgateway) |
+| Parallel tool calls | it makes the reordering of events non-deterministic |
+| Persistence, long-term memory | a runtime with no state of its own can be reused anywhere |
+| UI, structured logging, telemetry | this is not a service library: bring your own adapters |
 
-Il perimetro negato è scritto per intero in [`docs/rfc/0001-perimetro.md`](docs/rfc/0001-perimetro.md).
+The denied perimeter is written out in full in [`docs/rfc/0001-perimeter.md`](docs/rfc/0001-perimeter.md).
 
 ---
 
-## Le tre garanzie
+## The three guarantees
 
-### 1. Il budget non può essere scavalcato
+### 1. The budget cannot be bypassed
 
-`budget` è un **parametro obbligatorio**, non opzionale con un default. Un default
-verrà dimenticato, e il caso in cui si dimentica è proprio quello di un agente in tondo
-che chiama un provider a pagamento. Se il tetto non ti serve, lo dichiari:
-`Budget.unlimited()`.
+`budget` is a **required parameter**, not optional with a default. A default will be
+forgotten, and the case where it is forgotten is exactly that of a loopy agent calling a
+paid provider. If you do not need the cap, declare it: `Budget.unlimited()`.
 
-Il meccanismo è prenota → salda:
+The mechanism is reserve → settle:
 
-1. `reserve(estimate)` blocca subito la somma stimata; se non entra, la decisione **non
-   viene eseguita** e non costa nulla;
-2. la chiamata avviene davvero;
-3. `settle(actual)` sostituisce la stima col consumo reale e libera il resto.
+1. `reserve(estimate)` locks the estimated amount right away; if it does not fit, the
+   decision **is not executed** and costs nothing;
+2. the call actually happens;
+3. `settle(actual)` replaces the estimate with the real consumption and releases the rest.
 
-Gli importi sono **interi in micro-dollari** con un tipo marchiato. `0.1 + 0.2 !== 0.3`,
-e su un fatturato la differenza è un buco. Un modello assente dalla tabella dei prezzi
-viene valutato al **massimo** noto, non a zero: prezzo zero significa "il budget
-protegge" mentre non protegge niente.
+Amounts are **integer micro-dollars** with a branded type. `0.1 + 0.2 !== 0.3`,
+and on an invoice the difference is a hole. A model missing from the price table is
+valued at the **maximum** known price, not at zero: a zero price means "the budget
+protects something" while it protects nothing.
 
 ```ts
 const budget = new Budget(usd(0.01));
-await run({ policy, messages, budget });   // stopReason: 'budget' se non basta
-budget.spent;    // mai > limit
+await run({ policy, messages, budget });   // stopReason: 'budget' if it is not enough
+budget.spent;    // never > limit
 ```
 
-### 2. Gli argomenti del modello non sono fidati
+### 2. The model's arguments are not trusted
 
-Un tool che ha ricevuto input sbagliati fallisce in modo comprensibile: l'errore torna
-al modello, che lo corregge.
+A tool that received wrong input fails in an understandable way: the error goes back to
+the model, which fixes it.
 
 ```ts
-// il modello ha prodotto { da: 42 }
-content: 'ERRORE: Gli argomenti per "cerca_voli" non sono validi (1 problemi):
-  - /da: atteso string, ricevuto number 42
-Correggi solo i campi indicati e richiama "cerca_voli".'
+// the model produced { from: 42 }
+content: 'ERROR: The arguments for "search_flights" are not valid (1 problems):
+  - /from: expected string, received number 42
+Fix only the fields listed and call "search_flights" again.'
 ```
 
-Tutti gli errori insieme, non il primo: altrimenti un modello che sbaglia tre campi
-correggerebbe uno alla volta e ci metterebbe tre turni.
+All errors together, not the first one: otherwise a model that gets three fields wrong
+would fix them one at a time and take three turns.
 
-E c'è un confine oltre: se un tool solleva un errore **non previsto**, il modello non
-vede il testo dell'errore. Vede un messaggio neutro costruito dal runtime. Il motivo è
-in [`ADR 0004`](docs/adr/0004-cosa-si-mostra-al-modello.md): un agente riceve quel testo
-e lo usa per rispondere a **chiunque stia parlando con lui**.
+And there is a boundary beyond that: if a tool raises an **unexpected** error, the model
+does not see the error text. It sees a neutral message built by the runtime. The reason
+is in [`ADR 0004`](docs/adr/0004-what-is-shown-to-the-model.md): an agent receives that
+text and uses it to answer **whoever is talking to it**.
 
-### 3. Il run si rifà
+### 3. The run is redone
 
 ```ts
 const { result, equal, warnings } = await replay(traceJsonl, { tools: registry });
-// equal    → true: stessa identica esecuzione, senza rete e senza spendere nulla
-// warnings → il tool è cambiato? la traccia non descrive più il suo comportamento
+// equal    → true: the exact same execution, with no network and spending nothing
+// warnings → did the tool change? the trace no longer describes its behavior
 ```
 
-Tre modalità, dichiarate da chi chiama:
+Three modes, declared by the caller:
 
-| modalità | policy | tool | serve per |
+| mode | policy | tool | what it is for |
 |---|---|---|---|
-| `full` | dalla traccia | dalla traccia | test di regressione sul loop, audit, demo offline |
-| `live-tools` | dalla traccia | **veri** | "cosa cambia se il tool cambia?" |
-| `dry-run` | dalla traccia | saltati | quanto del run dipende dai tool? |
+| `full` | from the trace | from the trace | regression tests on the loop, audit, offline demo |
+| `live-tools` | from the trace | **real ones** | "what changes if the tool changes?" |
+| `dry-run` | from the trace | skipped | how much of the run depends on the tools? |
 
-Il replay non è un secondo percorso di codice: è **lo stesso loop** con dentro una
-`Policy` che legge da disco. È stato possibile solo perché la decisione e l'esecuzione
-sono già interfacce.
+Replay is not a second code path: it is **the same loop** with a `Policy` that reads
+from disk inside it. It was possible only because decision and execution are already
+interfaces.
 
-E se il tool è cambiato, `warnings` lo dice con l'impronta del codice. Una traccia che
-riproduce qualcosa di diverso, in silenzio, è una traccia che mente.
+And if the tool changed, `warnings` says so with the code fingerprint. A trace that
+reproduces something different, silently, is a trace that lies.
 
 ---
 
-## Uso
+## Usage
 
 ```bash
 npm install
-npm run ci        # typecheck + lint + test: quello che gira in CI
+npm run ci        # typecheck + lint + test: what runs in CI
 
 export OPENAI_API_KEY=...
-npm run example                                    # esegue l'agente e scrive la traccia
-npx tsx examples/agente-voli.ts --replay traces/agente-voli.jsonl
+npm run example                                    # runs the agent and writes the trace
+npx tsx examples/flight-agent.ts --replay traces/flight-agent.jsonl
 ```
 
-`make ci` esiste e fa la stessa cosa, per chi ha `make`.
+`make ci` exists and does the same thing, for whoever has `make`.
 
-## Come è fatto
+## How it is built
 
 ```
 src/
-  types.ts      i tipi che attraversano tutto (readonly: lo stato non si muta)
-  errors.ts     ogni fallimento ha un tipo
-  budget.ts     prenotazione, saldo, micro-dollari
-  schema.ts     il sottoinsieme di JSON Schema ammesso
-  validate.ts   il validatore: errori strutturati, mai eccezioni
-  tool.ts       registro, garanzie all'ingresso, cosa si mostra al modello
-  trace.ts      eventi in sola aggiunta, ridazione, degradazione esplicita
-  loop.ts       il ciclo
-  replay.ts     rifare un run da una traccia
-  policy-openai.ts  l'unico file che conosce il mondo esterno
+  types.ts      the types that flow through everything (readonly: state is not mutated)
+  errors.ts     every failure has a type
+  budget.ts     reservation, settlement, micro-dollars
+  schema.ts     the allowed JSON Schema subset
+  validate.ts   the validator: structured errors, never exceptions
+  tool.ts       registry, checks on the way in, what is shown to the model
+  trace.ts      append-only events, redaction, explicit degradation
+  loop.ts       the cycle
+  replay.ts     redoing a run from a trace
+  policy-openai.ts  the only file that knows the outside world
 ```
 
-Il replay è la prova che la struttura regge: se la `Policy` e i `Tool` non fossero
-interfacce, ci sarebbe un secondo ciclo da mantenere, e i due divergerebbero.
+Replay is the proof that the structure holds: if `Policy` and `Tool` were not
+interfaces, there would be a second loop to maintain, and the two would diverge.
 
-## Documenti
+## Documents
 
-- [RFC 0001 — il perimetro](docs/rfc/0001-perimetro.md): cosa fa, cosa no, perché
-- [ADR 0001](docs/adr/0001-loop-come-riduttore.md): il loop è stato in, eventi fuori
-- [ADR 0002](docs/adr/0002-validatore-json-schema.md): validatore in casa, in un sottoinsieme
-- [ADR 0003](docs/adr/0003-replay-e-tool.md): le tre modalità di replay
-- [ADR 0004](docs/adr/0004-cosa-si-mostra-al-modello.md): cosa può finire davanti a un modello
-- [ADR 0000](docs/adr/0000-record-architecture-decisions.md): come si scrivono le ADR
+- [RFC 0001 — the perimeter](docs/rfc/0001-perimeter.md): what it does, what it does not, why
+- [ADR 0001](docs/adr/0001-loop-as-reducer.md): the loop is state in, events out
+- [ADR 0002](docs/adr/0002-json-schema-validator.md): an in-house validator, in a subset
+- [ADR 0003](docs/adr/0003-replay-and-tools.md): the three replay modes
+- [ADR 0004](docs/adr/0004-what-is-shown-to-the-model.md): what may end up in front of a model
+- [ADR 0000](docs/adr/0000-record-architecture-decisions.md): how ADRs are written
 
-Le decisioni valgono quanto il codice: se una è sbagliata, il codice è una conseguenza.
+The decisions weigh as much as the code: if one of them is wrong, the code is a
+consequence.
 
-## Cosa farei diversamente
+## What I would do differently
 
-- **Streaming.** L'ho escluso per il perimetro, ma è la cosa che un utente nota per
-  prima e un runtime agentico senza feels finto. Entra per prima.
-- **Tool in parallelo.** Escluderlo mi ha reso il replay deterministico con poco sforzo.
-  Ma un agente che deve leggere cinque file in parallelo è un caso reale, e lì
-  l'ordine degli eventi va deciso esplicitamente, non ereditato.
-- **`Budget.unlimited()` è una porta**. Esiste perché obbligare il tetto senza dare
-  una via d'uscita onesta produce `new Budget(1e18)` sparso ovunque. Va bene così,
-  ma se in futuro serve un audit, un budget dichiarato `unlimited` dovrebbe farsi
-  notare da solo.
-- **L'impronta del tool copre solo il corpo di `execute`**, non gli helper importati. Un
-  cambiamento dentro un helper non invalida la traccia. Ho scelto il limite perché
-  l'alternativa (hash del grafo di import) costa più del beneficio.
-- **Le decisioni di una `Policy` non sono ispezionabili.** Posso registrare la traccia e
-  il costo, non il ragionamento. Chi vorrà capire *perché* ha scelto un tool dovrà
-  mettere mano al provider.
+- **Streaming.** I ruled it out for the perimeter, but it is the thing a user notices
+  first, and an agentic runtime without it feels fake. It comes in first.
+- **Parallel tools.** Ruling it out made replay deterministic with little effort. But an
+  agent that has to read five files in parallel is a real case, and there the order of
+  events must be decided explicitly, not inherited.
+- **`Budget.unlimited()` is a door.** It exists because forcing the cap without giving an
+  honest way out produces `new Budget(1e18)` scattered everywhere. That is fine, but if
+  an audit is needed in the future, a budget declared `unlimited` should make itself
+  noticed.
+- **The tool fingerprint only covers the body of `execute`**, not the imported helpers.
+  A change inside a helper does not invalidate the trace. I chose the limit because the
+  alternative (hashing the import graph) costs more than the benefit.
+- **The decisions of a `Policy` are not inspectable.** I can record the trace and the
+  cost, not the reasoning. Whoever wants to understand *why* it chose a tool will have to
+  go into the provider.
 
-## Sviluppo
+## Development
 
 ```bash
 git clone git@github.com:paoValle/agentloop.git && cd agentloop
 npm ci && npm run ci
 ```
 
-## Licenza
+## License
 
 MIT © Paolo Valletta

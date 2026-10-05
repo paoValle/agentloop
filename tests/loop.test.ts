@@ -7,21 +7,21 @@ import { Trace } from '../src/trace.js';
 import { ToolRegistry, ToolError } from '../src/tool.js';
 import type { DecideRequest, Policy, PolicyOutcome, Tool, ToolCall } from '../src/types.js';
 
-const PREZZI = {
-  economico: { input: micros(1_000), output: micros(4_000) },
-  costoso: { input: micros(60_000), output: micros(120_000) },
+const PRICES = {
+  cheap: { input: micros(1_000), output: micros(4_000) },
+  expensive: { input: micros(60_000), output: micros(120_000) },
 };
 
-const inizio = [{ role: 'user', content: 'ciao' }] as const;
+const start = [{ role: 'user', content: 'hello' }] as const;
 
-/** Una Policy che restituisce decisioni prefissate: nessuna rete, nessuna attesa. */
-function script(skrizioni: PolicyOutcome[], modello = 'economico'): Policy {
+/** A Policy that returns preset decisions: no network, no waiting. */
+function script(entries: PolicyOutcome[], model = 'cheap'): Policy {
   let i = 0;
   return {
-    model: modello,
+    model,
     decide: async (_req: DecideRequest): Promise<PolicyOutcome> => {
-      const next = skrizioni[i++];
-      if (next === undefined) throw new Error('script esaurito');
+      const next = entries[i++];
+      if (next === undefined) throw new Error('script exhausted');
       return next;
     },
   };
@@ -29,121 +29,121 @@ function script(skrizioni: PolicyOutcome[], modello = 'economico'): Policy {
 
 const usage = (inputTokens = 100, outputTokens = 50) => ({ inputTokens, outputTokens });
 
-const messaggio = (content: string): PolicyOutcome => ({
+const message = (content: string): PolicyOutcome => ({
   decision: { type: 'message', content },
   usage: usage(),
-  model: 'economico',
+  model: 'cheap',
 });
 
-const chiamaTool = (call: ToolCall): PolicyOutcome => ({
+const callTool = (call: ToolCall): PolicyOutcome => ({
   decision: { type: 'tool', call },
   usage: usage(),
-  model: 'economico',
+  model: 'cheap',
 });
 
-const esegue = (name: string, output: unknown = 'ok'): Tool => ({
+const runs = (name: string, output: unknown = 'ok'): Tool => ({
   name,
-  description: `Esegue ${name}.`,
+  description: `Runs ${name}.`,
   schema: { type: 'object' },
   execute: () => output,
 });
 
-const registro = (...tools: Tool[]): ToolRegistry => new ToolRegistry(tools);
+const registry = (...tools: Tool[]): ToolRegistry => new ToolRegistry(tools);
 
-describe('run: il percorso normale', () => {
-  it('un modello che risponde subito chiude al primo passo', async () => {
-    const result = await run({ policy: script([messaggio('buongiorno')]), budget: new Budget(usd(1)), messages: inizio });
+describe('run: the happy path', () => {
+  it('a model that answers immediately closes on the first step', async () => {
+    const result = await run({ policy: script([message('good morning')]), budget: new Budget(usd(1)), messages: start });
 
     expect(result.stopReason).toBe('end_turn');
-    expect(result.answer).toBe('buongiorno');
+    expect(result.answer).toBe('good morning');
     expect(result.steps).toBe(1);
     expect(result.messages).toHaveLength(2);
   });
 
-  it('un tool viene eseguito e il suo risultato torna nel contesto', async () => {
+  it('a tool is executed and its result comes back into the context', async () => {
     const result = await run({
-      policy: script([chiamaTool({ id: 'c1', name: 'saluta', args: {} }), messaggio('fatto')]),
-      tools: registro(esegue('saluta', 'ciao da dentro')),
+      policy: script([callTool({ id: 'c1', name: 'greet', args: {} }), message('done')]),
+      tools: registry(runs('greet', 'hello from inside')),
       budget: new Budget(usd(1)),
-      messages: inizio,
+      messages: start,
     });
 
     expect(result.stopReason).toBe('end_turn');
     const toolMessage = result.messages.find((m) => m.role === 'tool');
-    expect(toolMessage).toMatchObject({ role: 'tool', name: 'saluta', tool_call_id: 'c1', content: 'ciao da dentro' });
+    expect(toolMessage).toMatchObject({ role: 'tool', name: 'greet', tool_call_id: 'c1', content: 'hello from inside' });
   });
 
-  it('un output non stringa viene reso JSON nel contesto', async () => {
+  it('a non-string output is rendered as JSON in the context', async () => {
     const result = await run({
-      policy: script([chiamaTool({ id: 'c1', name: 'conta', args: {} }), messaggio('ok')]),
-      tools: registro(esegue('conta', { n: 42 })),
+      policy: script([callTool({ id: 'c1', name: 'count', args: {} }), message('ok')]),
+      tools: registry(runs('count', { n: 42 })),
       budget: new Budget(usd(1)),
-      messages: inizio,
+      messages: start,
     });
     expect(result.messages.find((m) => m.role === 'tool')?.content).toBe('{"n":42}');
   });
 
-  it('la Policy vede i tool registrati e i messaggi accumulati', async () => {
-    const visti: DecideRequest[] = [];
+  it('the Policy sees the registered tools and the accumulated messages', async () => {
+    const seen: DecideRequest[] = [];
     const policy: Policy = {
-      model: 'economico',
+      model: 'cheap',
       decide: async (req) => {
-        visti.push(req);
-        return req.messages.length > 2 ? messaggio('ok') : chiamaTool({ id: 'c1', name: 'saluta', args: {} });
+        seen.push(req);
+        return req.messages.length > 2 ? message('ok') : callTool({ id: 'c1', name: 'greet', args: {} });
       },
     };
-    await run({ policy, tools: registro(esegue('saluta')), budget: new Budget(usd(1)), messages: inizio });
+    await run({ policy, tools: registry(runs('greet')), budget: new Budget(usd(1)), messages: start });
 
-    expect(visti[0]?.messages).toHaveLength(1);
-    expect(visti[0]?.tools.map((t) => t.name)).toEqual(['saluta']);
-    expect(visti[1]?.messages).toHaveLength(3); // utente, assistant[tool], tool
+    expect(seen[0]?.messages).toHaveLength(1);
+    expect(seen[0]?.tools.map((t) => t.name)).toEqual(['greet']);
+    expect(seen[1]?.messages).toHaveLength(3); // user, assistant[tool], tool
   });
 
-  it('i message di sistema passano intatti', async () => {
+  it('system messages pass through untouched', async () => {
     const result = await run({
-      policy: script([messaggio('ok')]),
+      policy: script([message('ok')]),
       budget: new Budget(usd(1)),
-      messages: [{ role: 'system', content: 'sei utile' }, ...inizio],
+      messages: [{ role: 'system', content: 'you are useful' }, ...start],
     });
-    expect(result.messages[0]).toEqual({ role: 'system', content: 'sei utile' });
+    expect(result.messages[0]).toEqual({ role: 'system', content: 'you are useful' });
   });
 });
 
-describe('run: gli errori dei tool sono eventi, non incidenti', () => {
-  it('un tool che fallisce rimette il messaggio al modello e il run prosegue', async () => {
-    const rotto: Tool = {
-      name: 'carica',
-      description: 'Carica dati.',
+describe('run: tool errors are events, not incidents', () => {
+  it('a failing tool puts the message back to the model and the run continues', async () => {
+    const broken: Tool = {
+      name: 'load',
+      description: 'Loads data.',
       schema: { type: 'object' },
       execute: () => {
-        throw new ToolError('servizio non disponibile', true);
+        throw new ToolError('service unavailable', true);
       },
     };
     const result = await run({
-      policy: script([chiamaTool({ id: 'c1', name: 'carica', args: {} }), messaggio('non sono riuscito')]),
-      tools: registro(rotto),
+      policy: script([callTool({ id: 'c1', name: 'load', args: {} }), message('I could not do it')]),
+      tools: registry(broken),
       budget: new Budget(usd(1)),
-      messages: inizio,
+      messages: start,
     });
 
     expect(result.stopReason).toBe('end_turn');
-    expect(result.messages.find((m) => m.role === 'tool')?.content).toContain('servizio non disponibile');
+    expect(result.messages.find((m) => m.role === 'tool')?.content).toContain('service unavailable');
   });
 
-  it('un errore non previsto arriva al modello senza il contenuto', async () => {
-    const rotto: Tool = {
-      name: 'carica',
-      description: 'Carica dati.',
+  it('an unexpected error reaches the model without the content', async () => {
+    const broken: Tool = {
+      name: 'load',
+      description: 'Loads data.',
       schema: { type: 'object' },
       execute: () => {
         throw new Error('ECONNREFUSED 10.0.0.5:5432 password=hunter2');
       },
     };
     const result = await run({
-      policy: script([chiamaTool({ id: 'c1', name: 'carica', args: {} }), messaggio('ok')]),
-      tools: registro(rotto),
+      policy: script([callTool({ id: 'c1', name: 'load', args: {} }), message('ok')]),
+      tools: registry(broken),
       budget: new Budget(usd(1)),
-      messages: inizio,
+      messages: start,
     });
 
     const content = result.messages.find((m) => m.role === 'tool')?.content ?? '';
@@ -151,51 +151,51 @@ describe('run: gli errori dei tool sono eventi, non incidenti', () => {
     expect(content).not.toContain('10.0.0.5');
   });
 
-  it('gli argomenti sbagliati non raggiungono il tool', async () => {
-    let eseguito = false;
-    const sorvegliato: Tool = {
-      name: 'ordina',
-      description: 'Ordina.',
+  it('wrong arguments never reach the tool', async () => {
+    let executed = false;
+    const guarded: Tool = {
+      name: 'order',
+      description: 'Orders.',
       schema: {
         type: 'object',
         properties: { sku: { type: 'string' } },
         required: ['sku'],
       },
       execute: () => {
-        eseguito = true;
-        return 'ordine creato';
+        executed = true;
+        return 'order created';
       },
     };
     const result = await run({
-      policy: script([chiamaTool({ id: 'c1', name: 'ordina', args: { sku: 42 } }), messaggio('ok')]),
-      tools: registro(sorvegliato),
+      policy: script([callTool({ id: 'c1', name: 'order', args: { sku: 42 } }), message('ok')]),
+      tools: registry(guarded),
       budget: new Budget(usd(1)),
-      messages: inizio,
+      messages: start,
     });
 
-    expect(eseguito).toBe(false);
+    expect(executed).toBe(false);
     expect(result.messages.find((m) => m.role === 'tool')?.content).toContain('/sku');
   });
 });
 
-describe('run: il tetto di spesa non è negoziabile', () => {
-  it('un run troppo costoso si ferma con "budget" e non lo oltrepassa', async () => {
+describe('run: the spending cap is not negotiable', () => {
+  it('a run that is too expensive stops with "budget" and does not overrun it', async () => {
     const budget = new Budget(usd(0.001));
     const result = await run({
-      // 60.000 µUSD/M input: 100 token costano 6 µUSD, ma l'allowance di default è 50.000
+      // 60,000 µUSD/M input: 100 tokens cost 6 µUSD, but the default allowance is 50,000
       policy: script(
         [
-          chiamaTool({ id: 'c1', name: 'saluta', args: {} }),
-          chiamaTool({ id: 'c2', name: 'saluta', args: {} }),
-          messaggio('mai arrivata'),
+          callTool({ id: 'c1', name: 'greet', args: {} }),
+          callTool({ id: 'c2', name: 'greet', args: {} }),
+          message('never arrived'),
         ],
-        'costoso',
+        'expensive',
       ),
-      tools: registro(esegue('saluta')),
-      prices: PREZZI,
+      tools: registry(runs('greet')),
+      prices: PRICES,
       budget,
       stepAllowance: micros(10_000),
-      messages: inizio,
+      messages: start,
     });
 
     expect(result.stopReason).toBe('budget');
@@ -203,152 +203,152 @@ describe('run: il tetto di spesa non è negoziabile', () => {
     expect(result.spent).toBeLessThanOrEqual(budget.limit);
   });
 
-  it('la spesa reale non supera mai il tetto, nemmeno di un micro-dollaro', async () => {
+  it('the real spend never exceeds the cap, not even by one micro-dollar', async () => {
     const budget = new Budget(micros(100));
     await run({
       policy: script(
-        Array.from({ length: 50 }, (_v, i) => chiamaTool({ id: `c${i}`, name: 'saluta', args: {} })),
-        'costoso',
+        Array.from({ length: 50 }, (_v, i) => callTool({ id: `c${i}`, name: 'greet', args: {} })),
+        'expensive',
       ),
-      tools: registro(esegue('saluta')),
-      prices: PREZZI,
+      tools: registry(runs('greet')),
+      prices: PRICES,
       budget,
       stepAllowance: micros(60),
-      messages: inizio,
+      messages: start,
     });
     expect(budget.spent).toBeLessThanOrEqual(micros(100));
   });
 
-  it('il tetto si consuma sui passi reali, non sulle stime', async () => {
+  it('the cap is consumed by the real steps, not by the estimates', async () => {
     const budget = new Budget(usd(10));
     const result = await run({
-      policy: script([messaggio('a'), messaggio('b'), messaggio('c')], 'costoso'),
-      prices: PREZZI,
+      policy: script([message('a'), message('b'), message('c')], 'expensive'),
+      prices: PRICES,
       budget,
-      messages: inizio,
+      messages: start,
     });
-    expect(result.steps).toBe(1); // chiude al primo messaggio
+    expect(result.steps).toBe(1); // closes on the first message
     expect(budget.spent).toBeGreaterThan(0);
     expect(budget.held).toBe(0);
   });
 
-  it('nessuna prenotazione resta aperta alla fine', async () => {
+  it('no reservation is left open at the end', async () => {
     const budget = new Budget(usd(1));
-    await run({ policy: script([messaggio('ok')]), budget, prices: PREZZI, messages: inizio });
+    await run({ policy: script([message('ok')]), budget, prices: PRICES, messages: start });
     expect(budget.openReservations).toEqual([]);
   });
 });
 
-describe('run: gli arresti espliciti', () => {
-  it('maxSteps: un agente che gira in tondo si ferma', async () => {
+describe('run: the explicit stops', () => {
+  it('maxSteps: an agent going in circles stops', async () => {
     let n = 0;
     const policy: Policy = {
-      model: 'economico',
-      decide: async () => chiamaTool({ id: `c${n++}`, name: 'saluta', args: {} }),
+      model: 'cheap',
+      decide: async () => callTool({ id: `c${n++}`, name: 'greet', args: {} }),
     };
     const result = await run({
       policy,
-      tools: registro(esegue('saluta')),
+      tools: registry(runs('greet')),
       budget: new Budget(usd(1)),
       maxSteps: 3,
-      messages: inizio,
+      messages: start,
     });
     expect(result.stopReason).toBe('max_steps');
     expect(result.steps).toBe(3);
   });
 
-  it('il default di 12 passi esiste per un motivo: un agente in tondo costa', async () => {
+  it('the default of 12 steps exists for a reason: an agent in circles costs money', async () => {
     const policy: Policy = {
-      model: 'economico',
-      decide: async () => chiamaTool({ id: 'c', name: 'saluta', args: {} }),
+      model: 'cheap',
+      decide: async () => callTool({ id: 'c', name: 'greet', args: {} }),
     };
-    const result = await run({ policy, tools: registro(esegue('saluta')), budget: new Budget(usd(1)), messages: inizio });
+    const result = await run({ policy, tools: registry(runs('greet')), budget: new Budget(usd(1)), messages: start });
     expect(result.steps).toBe(12);
   });
 
-  it('abort: la cancellazione interrompe e si dichiara', async () => {
+  it('abort: cancellation interrupts and declares itself', async () => {
     const controller = new AbortController();
     controller.abort();
     const result = await run({
-      policy: script([messaggio('mai usata')]),
+      policy: script([message('never used')]),
       budget: new Budget(usd(1)),
       signal: controller.signal,
-      messages: inizio,
+      messages: start,
     });
     expect(result.stopReason).toBe('aborted');
     expect(result.steps).toBe(0);
   });
 
-  it('la decisione "stop" del modello viene rispettata', async () => {
+  it('the model\'s "stop" decision is honored', async () => {
     const result = await run({
-      policy: script([{ decision: { type: 'stop', reason: 'max_steps' }, usage: usage(), model: 'economico' }]),
+      policy: script([{ decision: { type: 'stop', reason: 'max_steps' }, usage: usage(), model: 'cheap' }]),
       budget: new Budget(usd(1)),
-      messages: inizio,
+      messages: start,
     });
     expect(result.stopReason).toBe('max_steps');
   });
 });
 
-describe('run: i guasti sono guasti', () => {
-  it('una Policy che non risponde solleva PolicyError, non un esito', async () => {
+describe('run: failures are failures', () => {
+  it('a Policy that does not answer raises PolicyError, not an outcome', async () => {
     const policy: Policy = {
-      model: 'economico',
+      model: 'cheap',
       decide: async () => {
         throw new Error('ECONNRESET');
       },
     };
-    await expect(run({ policy, budget: new Budget(usd(1)), messages: inizio })).rejects.toThrow(PolicyError);
+    await expect(run({ policy, budget: new Budget(usd(1)), messages: start })).rejects.toThrow(PolicyError);
   });
 
-  it('se la Policy fallisce, la prenotazione viene liberata', async () => {
+  it('if the Policy fails, the reservation is released', async () => {
     const budget = new Budget(usd(1));
     const policy: Policy = {
-      model: 'economico',
+      model: 'cheap',
       decide: async () => {
         throw new Error('boom');
       },
     };
-    await expect(run({ policy, budget, messages: inizio })).rejects.toThrow(PolicyError);
+    await expect(run({ policy, budget, messages: start })).rejects.toThrow(PolicyError);
     expect(budget.spent).toBe(0);
     expect(budget.openReservations).toEqual([]);
   });
 
-  it('una Policy che non dichiara il modello è un errore di programmazione', async () => {
-    const policy = { decide: async () => messaggio('x') } as unknown as Policy;
-    await expect(run({ policy, budget: new Budget(usd(1)), messages: inizio })).rejects.toThrow(/non dichiara il suo modello/);
+  it('a Policy that does not declare its model is a programming error', async () => {
+    const policy = { decide: async () => message('x') } as unknown as Policy;
+    await expect(run({ policy, budget: new Budget(usd(1)), messages: start })).rejects.toThrow(/does not declare its model/);
   });
 
-  it('un run senza messaggi iniziali è un errore di programmazione', async () => {
-    await expect(run({ policy: script([messaggio('x')]), budget: new Budget(usd(1)), messages: [] })).rejects.toThrow(TypeError);
+  it('a run without initial messages is a programming error', async () => {
+    await expect(run({ policy: script([message('x')]), budget: new Budget(usd(1)), messages: [] })).rejects.toThrow(TypeError);
   });
 });
 
 describe('resolvePrice', () => {
-  it('usa il prezzo dichiarato quando esiste', () => {
-    expect(resolvePrice(PREZZI, 'costoso').input).toBe(micros(60_000));
+  it('uses the declared price when it exists', () => {
+    expect(resolvePrice(PRICES, 'expensive').input).toBe(micros(60_000));
   });
 
-  it('un modello sconosciuto vale il massimo noto, non zero', () => {
-    // prezzo zero = il budget sembra proteggere mentre non protegge niente
-    const price = resolvePrice(PREZZI, 'modello-del-futuro');
+  it('an unknown model is worth the highest known price, not zero', () => {
+    // zero price = the budget looks like it protects something while it protects nothing
+    const price = resolvePrice(PRICES, 'model-of-the-future');
     expect(price.input).toBe(micros(60_000));
     expect(price.output).toBe(micros(120_000));
   });
 
-  it('senza tabella alcuna, tutto costa zero: e va detto', () => {
+  it('with no table at all, everything costs zero: and that must be said', () => {
     expect(resolvePrice({}, 'x')).toEqual({ input: 0, output: 0 });
   });
 });
 
-describe('run: la traccia racconta il run', () => {
-  it('emette gli eventi nell’ordine in cui il loop li produce', async () => {
+describe('run: the trace tells the run', () => {
+  it('emits the events in the order the loop produces them', async () => {
     const trace = new Trace({ clock: () => 0 });
     await run({
-      policy: script([chiamaTool({ id: 'c1', name: 'saluta', args: {} }), messaggio('finito')]),
-      tools: registro(esegue('saluta', 'ciao')),
+      policy: script([callTool({ id: 'c1', name: 'greet', args: {} }), message('finished')]),
+      tools: registry(runs('greet', 'hello')),
       budget: new Budget(usd(1)),
       trace,
-      messages: inizio,
+      messages: start,
     });
 
     expect(trace.events.map((e) => e.type)).toEqual([
@@ -367,61 +367,61 @@ describe('run: la traccia racconta il run', () => {
     ]);
   });
 
-  it('il tool.call porta l’impronta del tool', async () => {
+  it('tool.call carries the tool fingerprint', async () => {
     const trace = new Trace({ clock: () => 0 });
     await run({
-      policy: script([chiamaTool({ id: 'c1', name: 'saluta', args: {} }), messaggio('finito')]),
-      tools: registro(esegue('saluta')),
+      policy: script([callTool({ id: 'c1', name: 'greet', args: {} }), message('finished')]),
+      tools: registry(runs('greet')),
       budget: new Budget(usd(1)),
       trace,
-      messages: inizio,
+      messages: start,
     });
     const call = trace.of('tool.call')[0];
     expect(call?.fingerprint).toMatch(/^[0-9a-f]{16}$/);
   });
 
-  it('un tool sensibile non scrive i suoi dati in traccia', async () => {
+  it('a sensitive tool does not write its data into the trace', async () => {
     const trace = new Trace({ clock: () => 0 });
-    const sensibile: Tool = {
-      name: 'leggi',
-      description: 'Legge un profilo.',
+    const sensitive: Tool = {
+      name: 'read',
+      description: 'Reads a profile.',
       schema: { type: 'object' },
       sensitive: true,
-      execute: () => ({ nome: 'Mario Rossi', cf: 'RSSMRA80A01H501U' }),
+      execute: () => ({ name: 'Mario Rossi', ssn: 'RSSMRA80A01H501U' }),
     };
     await run({
       policy: script([
-        chiamaTool({ id: 'c1', name: 'leggi', args: { paziente: 'Mario Rossi' } }),
-        messaggio('ok'),
+        callTool({ id: 'c1', name: 'read', args: { patient: 'Mario Rossi' } }),
+        message('ok'),
       ]),
-      tools: registro(sensibile),
+      tools: registry(sensitive),
       budget: new Budget(usd(1)),
       trace,
-      messages: inizio,
+      messages: start,
     });
 
-    const testo = trace.toJSONL();
-    expect(testo).not.toContain('RSSMRA80A01H501U');
-    expect(testo).not.toContain('Mario Rossi');
+    const text = trace.toJSONL();
+    expect(text).not.toContain('RSSMRA80A01H501U');
+    expect(text).not.toContain('Mario Rossi');
   });
 
-  it('run.end riporta spesa e motivo della fine', async () => {
+  it('run.end reports the spend and the reason it ended', async () => {
     const trace = new Trace({ clock: () => 0 });
-    await run({ policy: script([messaggio('ok')]), budget: new Budget(usd(1)), prices: PREZZI, trace, messages: inizio });
-    const fine = trace.of('run.end')[0];
-    expect(fine).toMatchObject({ steps: 1, stopReason: 'end_turn' });
-    expect(fine?.spentUsd).toMatch(/^\d+\.\d{6}$/);
+    await run({ policy: script([message('ok')]), budget: new Budget(usd(1)), prices: PRICES, trace, messages: start });
+    const end = trace.of('run.end')[0];
+    expect(end).toMatchObject({ steps: 1, stopReason: 'end_turn' });
+    expect(end?.spentUsd).toMatch(/^\d+\.\d{6}$/);
   });
 
-  it('due run identici producono tracce identiche modulo il tempo', async () => {
-    const esegui = async (): Promise<RunResult> =>
+  it('two identical runs produce identical traces modulo time', async () => {
+    const execute = async (): Promise<RunResult> =>
       run({
-        policy: script([chiamaTool({ id: 'c1', name: 'saluta', args: {} }), messaggio('ok')]),
-        tools: registro(esegue('saluta', 'ciao')),
+        policy: script([callTool({ id: 'c1', name: 'greet', args: {} }), message('ok')]),
+        tools: registry(runs('greet', 'hello')),
         budget: new Budget(usd(1)),
-        prices: PREZZI,
-        messages: inizio,
+        prices: PRICES,
+        messages: start,
       });
-    expect((await esegui()).trace.normalized()).toEqual((await esegui()).trace.normalized());
+    expect((await execute()).trace.normalized()).toEqual((await execute()).trace.normalized());
   });
 });

@@ -9,126 +9,126 @@ import {
   traceableCall,
 } from '../src/trace.js';
 
-const fisso = (): Trace => new Trace({ clock: () => 1_700_000_000_000 });
+const fixed = (): Trace => new Trace({ clock: () => 1_700_000_000_000 });
 
-const parametri = { budgetLimit: 1_000_000, maxSteps: 12, stepAllowance: 50_000, price: { input: 3, output: 15 } };
+const parameters = { budgetLimit: 1_000_000, maxSteps: 12, stepAllowance: 50_000, price: { input: 3, output: 15 } };
 
-describe('toTraceable: non deve mai fallire', () => {
-  it('passa attraverso i valori semplici', () => {
+describe('toTraceable: it must never fail', () => {
+  it('passes simple values through', () => {
     expect(toTraceable({ a: 1, b: 'x', c: [true, null] })).toEqual({ a: 1, b: 'x', c: [true, null] });
   });
 
-  it('un Error diventa nome e messaggio, non stack con path assoluti', () => {
-    expect(toTraceable(new TypeError('non è un numero'))).toEqual({
+  it('an Error becomes name and message, not a stack with absolute paths', () => {
+    expect(toTraceable(new TypeError('not a number'))).toEqual({
       name: 'TypeError',
-      message: 'non è un numero',
+      message: 'not a number',
     });
   });
 
-  it('un ciclo non ricorre all’infinito', () => {
-    const cyclic: Record<string, unknown> = { nome: 'x' };
-    cyclic.seStesso = cyclic;
-    expect(toTraceable(cyclic)).toMatchObject({ nome: 'x', seStesso: { degraded: 'ciclo' } });
+  it('a cycle does not recurse forever', () => {
+    const cyclic: Record<string, unknown> = { name: 'x' };
+    cyclic.itself = cyclic;
+    expect(toTraceable(cyclic)).toMatchObject({ name: 'x', itself: { degraded: 'cycle' } });
   });
 
-  it('degrada quello che non ha senso serializzare', () => {
+  it('degrades what makes no sense to serialize', () => {
     expect(toTraceable(Number.NaN)).toEqual({ degraded: 'number: NaN' });
     expect(toTraceable(10n)).toEqual({ degraded: 'bigint: 10' });
     expect(toTraceable(new Map([['a', 1]]))).toEqual({ degraded: 'Map(1)' });
     expect(toTraceable(new Set([1]))).toEqual({ degraded: 'Set(1)' });
     expect(toTraceable(new Date(0))).toBe('1970-01-01T00:00:00.000Z');
-    expect(toTraceable(() => undefined)).toEqual({ degraded: 'function: anonima' });
+    expect(toTraceable(() => undefined)).toEqual({ degraded: 'function: anonymous' });
   });
 
-  it('taglia la profondità invece di scendere all’inferno', () => {
-    let deep: Record<string, unknown> = { fine: true };
-    for (let i = 0; i < 30; i++) deep = { sotto: deep };
-    expect(JSON.stringify(toTraceable(deep))).toContain('profondità massima');
+  it('cuts the depth instead of descending into hell', () => {
+    let deep: Record<string, unknown> = { end: true };
+    for (let i = 0; i < 30; i++) deep = { below: deep };
+    expect(JSON.stringify(toTraceable(deep))).toContain('maximum depth');
   });
 
-  it('lo stesso oggetto che compare due volte non diventa un falso ciclo', () => {
-    const condiviso = { k: 1 };
-    expect(toTraceable({ a: condiviso, b: condiviso })).toEqual({ a: { k: 1 }, b: { k: 1 } });
-  });
-});
-
-describe('ridazione', () => {
-  it('un tool sensibile non scrive il contenuto, ma dice quanto era grande', () => {
-    const paziente = { nome: 'Mario Rossi', email: 'mario@example.com' };
-    expect(redact(paziente)).toEqual({ redacted: true, bytes: JSON.stringify(paziente).length });
-  });
-
-  it('il contenuto redatto è davvero sparito', () => {
-    const scritto = JSON.stringify(prepareForTrace({ email: 'mario@example.com' }, { sensitive: true }));
-    expect(scritto).not.toContain('mario@example.com');
-    expect(scritto).toContain('"redacted":true');
+  it('the same object appearing twice does not become a false cycle', () => {
+    const shared = { k: 1 };
+    expect(toTraceable({ a: shared, b: shared })).toEqual({ a: { k: 1 }, b: { k: 1 } });
   });
 });
 
-describe('troncamento', () => {
-  it('sotto la soglia non si tocca', () => {
-    expect(prepareForTrace({ piccolo: 1 }, { sensitive: false })).toEqual({ piccolo: 1 });
+describe('redaction', () => {
+  it('a sensitive tool does not write the content, but says how big it was', () => {
+    const patient = { name: 'Mario Rossi', email: 'mario@example.com' };
+    expect(redact(patient)).toEqual({ redacted: true, bytes: JSON.stringify(patient).length });
   });
 
-  it('sopra la soglia dichiara cosa è stato tagliato', () => {
-    const enorme = { dati: 'x'.repeat(MAX_TRACE_VALUE_BYTES * 2) };
-    const out = prepareForTrace(enorme, { sensitive: false }) as Record<string, unknown>;
+  it('the redacted content is really gone', () => {
+    const written = JSON.stringify(prepareForTrace({ email: 'mario@example.com' }, { sensitive: true }));
+    expect(written).not.toContain('mario@example.com');
+    expect(written).toContain('"redacted":true');
+  });
+});
+
+describe('truncation', () => {
+  it('below the threshold it is left alone', () => {
+    expect(prepareForTrace({ small: 1 }, { sensitive: false })).toEqual({ small: 1 });
+  });
+
+  it('above the threshold it declares what was cut', () => {
+    const huge = { data: 'x'.repeat(MAX_TRACE_VALUE_BYTES * 2) };
+    const out = prepareForTrace(huge, { sensitive: false }) as Record<string, unknown>;
     expect(out.__truncated).toMatchObject({ truncated: true });
     expect((out.__truncated as { bytes: number }).bytes).toBeGreaterThan(MAX_TRACE_VALUE_BYTES);
   });
 
-  it('il ridatto non viene troncato: la sua dimensione è già un fatto utile', () => {
-    const enorme = 'x'.repeat(MAX_TRACE_VALUE_BYTES * 2);
-    const out = prepareForTrace(enorme, { sensitive: true });
+  it('a redacted value is not truncated: its size is already a useful fact', () => {
+    const huge = 'x'.repeat(MAX_TRACE_VALUE_BYTES * 2);
+    const out = prepareForTrace(huge, { sensitive: true });
     expect(out).toMatchObject({ redacted: true });
     expect(out).not.toHaveProperty('__truncated');
   });
 });
 
 describe('Trace', () => {
-  it('assegna seq monotoni e gap-free', () => {
-    const trace = fisso();
-    trace.append({ type: 'run.start', runId: 'r1', messages: [], tools: [], parameters: parametri });
+  it('assigns monotonic, gap-free seq values', () => {
+    const trace = fixed();
+    trace.append({ type: 'run.start', runId: 'r1', messages: [], tools: [], parameters });
     trace.append({ type: 'step.start', step: 0 });
     trace.append({ type: 'step.start', step: 1 });
     expect(trace.events.map((e) => e.seq)).toEqual([0, 1, 2]);
   });
 
-  it('filtra per tipo, mantenendo l’ordine', () => {
-    const trace = fisso();
+  it('filters by type, keeping the order', () => {
+    const trace = fixed();
     trace.append({ type: 'step.start', step: 0 });
     trace.append({ type: 'policy.request', step: 0, model: 'm', messageCount: 1 });
     trace.append({ type: 'step.start', step: 1 });
     expect(trace.of('step.start').map((e) => e.step)).toEqual([0, 1]);
   });
 
-  it('JSONL: una riga per evento, e il ritorno all’identico', () => {
-    const trace = fisso();
-    trace.append({ type: 'run.start', runId: 'r1', messages: [{ role: 'user', content: 'ciao' }], tools: ['a'], parameters: parametri });
+  it('JSONL: one line per event, and the way back to the identical thing', () => {
+    const trace = fixed();
+    trace.append({ type: 'run.start', runId: 'r1', messages: [{ role: 'user', content: 'hello' }], tools: ['a'], parameters });
     trace.append({ type: 'run.end', steps: 0, stopReason: 'end_turn', spent: 0, spentUsd: '0.000000' });
 
-    const righe = trace.toJSONL().split('\n');
-    expect(righe).toHaveLength(2);
-    const secondo = JSON.parse(righe[1] as string) as { type: string; stopReason?: string };
-    expect(secondo.stopReason).toBe('end_turn');
+    const lines = trace.toJSONL().split('\n');
+    expect(lines).toHaveLength(2);
+    const second = JSON.parse(lines[1] as string) as { type: string; stopReason?: string };
+    expect(second.stopReason).toBe('end_turn');
 
-    const riletta = Trace.parse(trace.toJSONL());
-    expect(riletta.normalized()).toEqual(trace.normalized());
+    const reread = Trace.parse(trace.toJSONL());
+    expect(reread.normalized()).toEqual(trace.normalized());
   });
 
-  it('una riga malformata è un errore, non un buco silenzioso', () => {
-    const trace = fisso();
-    trace.append({ type: 'run.start', runId: 'r1', messages: [], tools: [], parameters: parametri });
-    expect(() => Trace.parse(`${trace.toJSONL()}\n{rotto`)).toThrow(SyntaxError);
-    expect(() => Trace.parse(`${trace.toJSONL()}\n{rotto`)).toThrow(/riga 2/);
+  it('a malformed line is an error, not a silent hole', () => {
+    const trace = fixed();
+    trace.append({ type: 'run.start', runId: 'r1', messages: [], tools: [], parameters });
+    expect(() => Trace.parse(`${trace.toJSONL()}\n{broken`)).toThrow(SyntaxError);
+    expect(() => Trace.parse(`${trace.toJSONL()}\n{broken`)).toThrow(/line 2/);
   });
 
-  it('tolera una riga vuota in coda', () => {
+  it('tolerates an empty line at the end', () => {
     expect(Trace.parse('{"seq":0,"ts":0,"type":"step.start","step":0}\n\n').length).toBe(1);
   });
 
-  it('normalized() toglie il tempo ma lascia la posizione', () => {
-    const a = fisso();
+  it('normalized() removes the time but keeps the position', () => {
+    const a = fixed();
     a.append({ type: 'step.start', step: 0 });
     const b = new Trace({ clock: () => 999 });
     b.append({ type: 'step.start', step: 0 });
@@ -136,25 +136,25 @@ describe('Trace', () => {
     expect(a.normalized()).not.toEqual(b.events);
   });
 
-  it('un orologio deterministico rende due tracce identiche byte per byte', () => {
-    const costruisci = (): Trace => {
-      const t = fisso();
+  it('a deterministic clock makes two traces identical byte for byte', () => {
+    const build = (): Trace => {
+      const t = fixed();
       t.append({ type: 'step.start', step: 0 });
       return t;
     };
-    expect(costruisci().toJSONL()).toBe(costruisci().toJSONL());
+    expect(build().toJSONL()).toBe(build().toJSONL());
   });
 });
 
 describe('traceableCall', () => {
-  it('gli argomenti di un tool sensibile non arrivano in traccia', () => {
-    const call = traceableCall({ id: 'c1', name: 'leggi_paziente', args: { cf: 'RSSMRA80A01H501U' } }, true);
-    expect(call.args).toEqual({ redacted: true, bytes: JSON.stringify({ cf: 'RSSMRA80A01H501U' }).length });
+  it('the arguments of a sensitive tool never reach the trace', () => {
+    const call = traceableCall({ id: 'c1', name: 'read_patient', args: { ssn: 'RSSMRA80A01H501U' } }, true);
+    expect(call.args).toEqual({ redacted: true, bytes: JSON.stringify({ ssn: 'RSSMRA80A01H501U' }).length });
     expect(JSON.stringify(call)).not.toContain('RSSMRA80A01H501U');
   });
 
-  it('un tool normale scrive gli argomenti per intero', () => {
-    const call = traceableCall({ id: 'c1', name: 'somma', args: { a: 1 } }, false);
+  it('a normal tool writes the arguments whole', () => {
+    const call = traceableCall({ id: 'c1', name: 'sum', args: { a: 1 } }, false);
     expect(call.args).toEqual({ a: 1 });
   });
 });

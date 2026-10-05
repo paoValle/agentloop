@@ -1,19 +1,18 @@
 /**
- * Il loop.
+ * The loop.
  *
- * Un passo, in ordine fisso e senza scorciatoie:
+ * One step, in fixed order and with no shortcuts:
  *
- *   1. prenota il costo del passo nel budget — se non entra, il run finisce **qui**,
- *      senza che nessuno abbia speso nulla;
- *   2. chiedi una decisione alla `Policy`;
- *   3. salda sul consumo reale, che può essere più basso della stima;
- *   4. se la decisione è un tool, validalo, eseguilo, e metti il risultato nel
- *      contesto — riuscito o fallito, il fallimento è un messaggio;
- *   5. se la decisione è un messaggio, il run è finito.
+ *   1. reserve the cost of the step in the budget — if it does not fit, the run ends
+ *      **here**, without anyone having spent anything;
+ *   2. ask the `Policy` for a decision;
+ *   3. settle on the real consumption, which can be lower than the estimate;
+ *   4. if the decision is a tool, validate it, execute it, and put the result into the
+ *      context — success or failure, the failure is a message;
+ *   5. if the decision is a message, the run is over.
  *
- * Ogni passo produce eventi di traccia **prima** del passo successivo. La traccia
- * non è un accessorio che si scrive alla fine: è il modo in cui il loop sa dove si
- * trova (ADR 0001).
+ * Every step emits trace events **before** the next step. The trace is not an
+ * accessory written at the end: it is how the loop knows where it is (ADR 0001).
  */
 
 import { Budget, costOf, formatUsd, micros, type MicroUsd, type Price, type PriceTable } from './budget.js';
@@ -22,67 +21,67 @@ import { Trace, prepareForTrace, redact, traceableCall } from './trace.js';
 import { ToolRegistry, invokeTool } from './tool.js';
 import type { Message, Policy, PolicyOutcome, StopReason, ToolCall } from './types.js';
 
-/** Prezzi noti, per modello. Un modello assente viene valutato peggio di tutti. */
+/** Known prices, per model. A missing model is valued worse than all of them. */
 export type { PriceTable };
 
 /**
- * Quanto si prenota prima di un passo.
+ * How much is reserved before a step.
  *
- * Non si può conoscere il costo di una chiamata prima di farla. La prima stima è
- * una soglia configurata; dalla seconda in poi diventa il **massimo realmente
- * osservato** nel run. Un agente che a un passo usa 800 token e al successivo 40.000
- * smette di farsi trovare corto da un medio, e la previsione resta un tetto.
+ * The cost of a call cannot be known before making it. The first estimate is a
+ * configured threshold; from the second one on it becomes the **maximum actually
+ * observed** in the run. An agent that uses 800 tokens at one step and 40,000 at the
+ * next stops being caught short by an average one, and the forecast stays a cap.
  */
 export interface Estimation {
-  /** Stima per un passo ancora senza dati: il default è 5 ¢. */
+  /** Estimate for a step without data yet: the default is 5 ¢. */
   stepAllowance: MicroUsd;
-  /** Il massimo osservato finora. Zero finché non c'è stato nessun passo. */
+  /** The maximum observed so far. Zero until there has been no step. */
   observedMax: MicroUsd;
 }
 
 export interface RunOptions {
-  /** Chi decide. Deve dichiarare il proprio modello: un budget che non sa il prezzo non è un budget. */
+  /** Who decides. It must declare its model: a budget that does not know the price is not a budget. */
   readonly policy: Policy;
-  /** Il contesto iniziale. Obbligatorio: un run senza messaggi non ha senso. */
+  /** The initial context. Required: a run without messages makes no sense. */
   readonly messages: readonly Message[];
-  /** I tool raggiungibili dal modello. Di default, nessuno. */
+  /** The tools reachable by the model. By default, none. */
   readonly tools?: ToolRegistry;
   /**
-   * Il tetto di spesa. **Obbligatorio**.
+   * The spending cap. **Required**.
    *
-   * Un run senza tetto è un run che può spendere quanto gli pare. Renderlo opzionale
-   * con un default significa che il default verrà dimenticato, e il caso in cui si
-   * dimentica è proprio quello di un agente in tondo che chiama un provider a
-   * pagamento. Se il tetto non ti serve, dichiaralo: `Budget.unlimited()`.
+   * A run without a cap is a run that can spend as much as it likes. Making it
+   * optional with a default means the default will be forgotten, and the case where it
+   * is forgotten is exactly that of a loopy agent calling a paid provider. If you do
+   * not need the cap, declare it: `Budget.unlimited()`.
    */
   readonly budget: Budget;
-  /** Tetto di passi. Di default 12: oltre, un agente sta girando in tondo. */
+  /** Step cap. Defaults to 12: beyond that, an agent is going in circles. */
   readonly maxSteps?: number;
-  /** Traccia in cui scrivere. Di default, una traccia nuova in memoria. */
+  /** Trace to write to. By default, a new in-memory trace. */
   readonly trace?: Trace;
-  /** Prezzi per modello. Vedi `resolvePrice`. */
+  /** Prices per model. See `resolvePrice`. */
   readonly prices?: PriceTable;
-  /** Stima iniziale per un passo. Di default 5 ¢. */
+  /** Initial estimate for one step. Defaults to 5 ¢. */
   readonly stepAllowance?: MicroUsd;
-  /** Identificatore del run, per correlare log e tracce. */
+  /** Run identifier, to correlate logs and traces. */
   readonly runId?: string;
-  /** Cancellazione. Viene rispettata a ogni passo e passata a policy e tool. */
+  /** Cancellation. It is honored at every step and passed to policy and tools. */
   readonly signal?: AbortSignal;
 }
 
-/** Com'è finito un run. */
+/** How a run ended. */
 export interface RunResult {
-  /** La conversazione completa, compresi i messaggi `tool`. */
+  /** The full conversation, including `tool` messages. */
   readonly messages: readonly Message[];
-  /** Quanti passi sono stati eseguiti. */
+  /** How many steps were executed. */
   readonly steps: number;
-  /** Perché è finito. Sempre valorizzato: un run che finisce "non si sa" è un bug. */
+  /** Why it ended. Always set: a run that ends "who knows" is a bug. */
   readonly stopReason: StopReason;
-  /** Denaro effettivamente speso. */
+  /** Money actually spent. */
   readonly spent: MicroUsd;
-  /** Il testo finale, se il run è finito con `end_turn`. */
+  /** The final text, if the run ended with `end_turn`. */
   readonly answer?: string;
-  /** La traccia. Sempre presente, anche se il run è esploso. */
+  /** The trace. Always present, even if the run blew up. */
   readonly trace: Trace;
 }
 
@@ -90,11 +89,11 @@ const DEFAULT_MAX_STEPS = 12;
 const DEFAULT_STEP_ALLOWANCE = micros(50_000);
 
 /**
- * Esegue un run.
+ * Executes a run.
  *
- * Non lancia per gli errori *del run* (budget esaurito, passo massimo, cancellazione):
- * sono esiti, e tornano dentro `RunResult`. Lancia solo ciò che è un bug o un
- * guasto — una `Policy` che non risponde, un contesto malformato.
+ * It does not throw for *run* errors (budget exhausted, step cap, cancellation):
+ * those are outcomes, and they come back inside `RunResult`. It throws only for what
+ * is a bug or a failure — a `Policy` that does not answer, a malformed context.
  */
 export async function run(options: RunOptions): Promise<RunResult> {
   const tools = options.tools ?? new ToolRegistry();
@@ -102,16 +101,16 @@ export async function run(options: RunOptions): Promise<RunResult> {
   const trace = options.trace ?? new Trace();
   const maxSteps = options.maxSteps ?? DEFAULT_MAX_STEPS;
   const prices = options.prices ?? {};
-  // dichiarato come `string | undefined` di proposito: `Policy.model` è obbligatorio
-  // in TypeScript, ma una Policy può arrivare da JavaScript o da un cast. Un tetto
-  // che non sa il prezzo è peggio di nessun tetto, quindi si controlla comunque.
+  // declared as `string | undefined` on purpose: `Policy.model` is required in
+  // TypeScript, but a Policy can come from JavaScript or from a cast. A cap that does
+  // not know the price is worse than no cap, so it is checked anyway.
   const model = options.policy.model as string | undefined;
 
   if (options.messages.length === 0) {
-    throw new TypeError('un run ha bisogno di almeno un messaggio iniziale');
+    throw new TypeError('a run needs at least one initial message');
   }
   if (model === undefined) {
-    throw new TypeError('la Policy non dichiara il suo modello: senza il prezzo il budget non può funzionare');
+    throw new TypeError('the Policy does not declare its model: without the price the budget cannot work');
   }
 
   const price = resolvePrice(prices, model);
@@ -154,7 +153,7 @@ export async function run(options: RunOptions): Promise<RunResult> {
       reservation = budget.reserve(estimate);
     } catch (error) {
       if (!(error instanceof BudgetExceededError)) throw error;
-      // il tetto non lo permetteva: il run finisce senza che nessuno abbia speso nulla
+      // the cap did not allow it: the run ends without anyone having spent anything
       stopReason = 'budget';
       break;
     }
@@ -169,10 +168,10 @@ export async function run(options: RunOptions): Promise<RunResult> {
         ...(options.signal === undefined ? {} : { signal: options.signal }),
       });
     } catch (error) {
-      // la prenotazione non è stata spesa: si libera e l'errore sale
+      // the reservation was not spent: it is released and the error goes up
       budget.release(reservation);
       if (error instanceof BudgetExceededError) throw error;
-      throw new PolicyError(`la Policy ha fallito al passo ${step}`, { cause: error });
+      throw new PolicyError(`the Policy failed at step ${step}`, { cause: error });
     }
 
     const actual = costOf(outcome.usage, price);
@@ -184,8 +183,8 @@ export async function run(options: RunOptions): Promise<RunResult> {
       step,
       model: outcome.model,
       usage: outcome.usage,
-      // la decisione porta gli argomenti che il modello ha prodotto: se il tool
-      // è sensibile vanno ridatti anche qui, non solo in tool.call
+      // the decision carries the arguments the model produced: if the tool is
+      // sensitive they must be redacted here too, not only in tool.call
       decision: redactedDecision(outcome.decision, tools),
     });
     trace.append({ type: 'budget.settle', step, reserved: estimate, actual });
@@ -219,11 +218,11 @@ export async function run(options: RunOptions): Promise<RunResult> {
 }
 
 /**
- * Esegue un tool e restituisce i messaggi da aggiungere al contesto.
+ * Executes a tool and returns the messages to add to the context.
  *
- * Riuscito o fallito, il contenuto torna al modello: è così che un agente si
- * autocorregga. Il fallimento non solleva, perché un tool che fallisce è un evento
- * ordinario di un run, non un errore del runtime.
+ * Success or failure, the content goes back to the model: that is how an agent
+ * self-corrects. A failure does not raise, because a failing tool is an ordinary
+ * event of a run, not a runtime error.
  */
 async function runTool(
   tools: ToolRegistry,
@@ -266,17 +265,17 @@ async function runTool(
     ];
   }
   return [
-    { role: 'tool', tool_call_id: call.id, name: call.name, content: `ERRORE: ${outcome.failure.message}` },
+    { role: 'tool', tool_call_id: call.id, name: call.name, content: `ERROR: ${outcome.failure.message}` },
   ];
 }
 
 /**
- * La decisione come va in traccia.
+ * The decision as it goes into the trace.
  *
- * Una decisione di tool porta con sé gli argomenti, e quegli argomenti possono
- * essere dati personali. Redonderli solo in `tool.call` non basta: finirebbero in
- * `policy.response`, che è scritto una riga prima e finisce negli stessi file che
- * finiscono nei backup.
+ * A tool decision carries its arguments, and those arguments can be personal data.
+ * Redacting them only in `tool.call` is not enough: they would end up in
+ * `policy.response`, which is written one line earlier and ends up in the same files
+ * that end up in backups.
  */
 function redactedDecision(decision: PolicyOutcome['decision'], tools: ToolRegistry): PolicyOutcome['decision'] {
   if (decision.type !== 'tool') return decision;
@@ -288,7 +287,7 @@ function redactedDecision(decision: PolicyOutcome['decision'], tools: ToolRegist
   };
 }
 
-/** Il messaggio `assistant` che corrisponde a una decisione. */
+/** The `assistant` message that corresponds to a decision. */
 function assistantMessage(decision: PolicyOutcome['decision']): Message {
   if (decision.type === 'message') return { role: 'assistant', content: decision.content };
   if (decision.type === 'stop') return { role: 'assistant', content: `[stop: ${decision.reason}]` };
@@ -298,28 +297,28 @@ function assistantMessage(decision: PolicyOutcome['decision']): Message {
   };
 }
 
-/** Come si rende un output di tool nel contesto: quasi sempre JSON, mai `undefined`. */
+/** How a tool output is rendered into the context: almost always JSON, never `undefined`. */
 function asContent(output: unknown): string {
   if (typeof output === 'string') return output;
-  if (output === undefined) return '(nessun risultato)';
+  if (output === undefined) return '(no result)';
   try {
-    // annotato come `string | undefined` perché a runtime può esserlo:
-    // `JSON.stringify` restituisce `undefined` per una funzione o un simbolo
-    const serializzato: unknown = JSON.stringify(output);
-    return typeof serializzato === 'string' ? serializzato : '(risultato non serializzabile)';
+    // annotated as `string | undefined` because at runtime it can be:
+    // `JSON.stringify` returns `undefined` for a function or a symbol
+    const serialized: unknown = JSON.stringify(output);
+    return typeof serialized === 'string' ? serialized : '(result not serializable)';
   } catch {
-    return '(risultato non serializzabile)';
+    return '(result not serializable)';
   }
 }
 
 /**
- * Il prezzo di un modello.
+ * The price of a model.
  *
- * Un modello assente dalla tabella viene valutato al **massimo** prezzo noto, non
- * a zero. La ragione: `UNKNOWN_MODEL = 0` fa sembrare che il budget protegga mentre
- * non protegge niente, e un modello nuovo che entra in produzione è il momento
- * esatto in cui non si vuole che il tetto spari. Essere pessimisti costa un passo in
- * più; essere ottimisti costa denaro vero.
+ * A model missing from the table is valued at the **highest** known price, not at
+ * zero. The reason: `UNKNOWN_MODEL = 0` makes the budget look like it protects
+ * something while it protects nothing, and a new model entering production is exactly
+ * the moment when you do not want the cap to vanish. Being pessimistic costs one more
+ * step; being optimistic costs real money.
  */
 export function resolvePrice(prices: PriceTable, model: string): Price {
   const found = prices[model];

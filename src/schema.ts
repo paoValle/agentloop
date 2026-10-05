@@ -1,42 +1,43 @@
 /**
- * Il sottoinsieme di JSON Schema che questo runtime capisce.
+ * The subset of JSON Schema that this runtime understands.
  *
- * I tipi vivono qui e il validatore pure in `validate()`: chi registra un tool deve
- * poter descrivere il proprio schema senza importare l'implementazione.
+ * The types live here and the validator lives in `validate()` too: whoever registers
+ * a tool must be able to describe its schema without importing the implementation.
  *
- * Le parole chiave supportate sono elencate in `SUPPORTED_KEYWORDS` e sono le uniche
- * ammesse. Una parola chiave sconosciuta è un errore di sviluppo, non un dettaglio
- * ignorato: vedi ADR 0002.
+ * The supported keywords are listed in `SUPPORTED_KEYWORDS` and they are the only
+ * ones allowed. An unknown keyword is a development error, not an ignored detail:
+ * see ADR 0002.
  */
 
-/** I tipi JSON, come li nomina lo standard. */
+/** The JSON types, as the standard names them. */
 export type JsonSchemaType = 'string' | 'number' | 'integer' | 'boolean' | 'object' | 'array' | 'null';
 
 /**
- * Uno schema. Solo le parole chiave del sottoinsieme.
+ * A schema. Only the keywords from the subset.
  *
- * `additionalProperties` è un booleano e basta: gli schemi dinamici (`patternProperties`,
- * `additionalProperties: {...}`) non sono supportati e falliscono all'uso.
+ * `additionalProperties` is a boolean and nothing else: dynamic schemas
+ * (`patternProperties`, `additionalProperties: {...}`) are not supported and fail
+ * when used.
  */
 export interface JsonSchema {
-  /** Tipo atteso. Un array di tipi vale come unione: `['string', 'null']`. */
+  /** Expected type. An array of types counts as a union: `['string', 'null']`. */
   readonly type?: JsonSchemaType | readonly JsonSchemaType[];
-  /** Testo mostrato al modello. Non parte della validazione. */
+  /** Text shown to the model. Not part of validation. */
   readonly description?: string;
 
-  /** Campi di un oggetto. */
+  /** Fields of an object. */
   readonly properties?: Readonly<Record<string, JsonSchema>>;
-  /** Nomi dei campi obbligatori. */
+  /** Names of the required fields. */
   readonly required?: readonly string[];
-  /** `false` rifiuta qualunque campo non elencato in `properties`. */
+  /** `false` rejects any field not listed in `properties`. */
   readonly additionalProperties?: boolean;
 
-  /** Valori ammessi, confrontati per deep-equal. */
+  /** Allowed values, compared by deep-equal. */
   readonly enum?: readonly unknown[];
 
-  /** Tipo degli elementi di un array. */
+  /** Type of the elements of an array. */
   readonly items?: JsonSchema;
-  /** Almeno uno dei sotto-schemi deve valere. */
+  /** At least one of the sub-schemas must hold. */
   readonly anyOf?: readonly JsonSchema[];
 
   readonly minimum?: number;
@@ -47,17 +48,17 @@ export interface JsonSchema {
   readonly maxItems?: number;
 }
 
-/** Una validazione non riuscita. `path` è un JSON Pointer: `/utente/email`. */
+/** A failed validation. `path` is a JSON Pointer: `/user/email`. */
 export interface ValidationError {
-  /** Dove, in notazione JSON Pointer. Stringa vuota per la radice. */
+  /** Where, in JSON Pointer notation. Empty string for the root. */
   readonly path: string;
-  /** Perché, in una frase che un modello può leggere e correggere. */
+  /** Why, in a sentence a model can read and fix itself with. */
   readonly message: string;
 }
 
 /**
- * Le parole chiave ammesse, in un solo posto, così l'elenco è verificabile da un
- * test: aggiungere una keyword qui senza implementarla deve rompere qualcosa.
+ * The allowed keywords, in a single place, so the list is checkable by a test:
+ * adding a keyword here without implementing it must break something.
  */
 export const SUPPORTED_KEYWORDS = [
   'type',

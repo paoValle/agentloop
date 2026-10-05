@@ -1,55 +1,53 @@
 /**
- * La traccia: il log di un run, in sola aggiunta.
+ * The trace: the append-only log of a run.
  *
- * Non è un file di log. Un log dice "cosa è successo" in formato leggibile; la
- * traccia dice "cosa è successo" in un formato che si può **rileggere e su cui si
- * può scrivere un test** (ADR 0001). Per questo ogni evento è un valore JSON senza
- * campi impilabili e senza orari obbligatori: due esecuzioni della stessa conversazione
- * producono tracce identiche salvo il tempo.
+ * It is not a log file. A log says "what happened" in a readable format; the trace
+ * says "what happened" in a format that can be **read back and asserted on in a test**
+ * (ADR 0001). That is why every event is a JSON value with no stacked fields and no
+ * mandatory timestamps: two executions of the same conversation produce identical
+ * traces except for time.
  *
- * Tre problemi che una traccia naïve sbaglia, e come sono risolti qui:
+ * Three problems a naïve trace gets wrong, and how they are solved here:
  *
- * - **i dati personali finiscono in traccia.** Un tool che legge un profilo utente
- *   scrive nel log ciò che ha letto. I tool che lo fatti si dichiarano `sensitive`
- *   e i loro argomenti e risultati finiscono redatti: resta la dimensione, non il
- *   contenuto.
- * - **un output non serializzabile fa esplodere il logging.** Un tool può restituire
- *   una classe, un `Map`, o qualcosa con un ciclo. `toTraceable` non fallisce mai:
- *   degrada e dice che ha degradato.
- * - **un output enorme fa esplodere il file.** Troncamento con il conto esatto di
- *   cosa è stato tagliato, perché una traccia che mente sembrando completa è peggio
- *   di una assente.
+ * - **personal data ends up in the trace.** A tool that reads a user profile writes
+ *   what it read into the log. Tools that do that declare themselves `sensitive` and
+ *   their arguments and results are redacted: the size stays, the content does not.
+ * - **a non-serializable output blows up logging.** A tool may return a class, a
+ *   `Map`, or something with a cycle. `toTraceable` never fails: it degrades and says
+ *   that it degraded.
+ * - **a huge output blows up the file.** Truncation with the exact count of what was
+ *   cut, because a trace that lies while looking complete is worse than a missing one.
  */
 
 import type { Decision, Message, StopReason, ToolCall, ToolFailure, Usage } from './types.js';
 
-/** Campi comuni a ogni evento. */
+/** Fields common to every event. */
 interface TraceBase {
-  /** Posizione nella traccia. Monotono, gap-free: un buco significa una perdita. */
+  /** Position in the trace. Monotonic, gap-free: a hole means a loss. */
   readonly seq: number;
-  /** Unix ms. Presente per l'analisi, **ignorato** dal confronto di replay. */
+  /** Unix ms. Present for analysis, **ignored** by the replay comparison. */
   readonly ts: number;
 }
 
-/** I parametri che determinano un run: senza, la traccia non basta a rifarlo. */
+/** The parameters that determine a run: without them, the trace is not enough to redo it. */
 export interface RunParameters {
-  /** Tetto di spesa, in µUSD. */
+  /** Spending cap, in µUSD. */
   readonly budgetLimit: number;
-  /** Tetto di passi. */
+  /** Step cap. */
   readonly maxSteps: number;
-  /** Stima con cui parte il primo passo, in µUSD. */
+  /** Estimate the first step starts from, in µUSD. */
   readonly stepAllowance: number;
   /**
-   * Il prezzo **risolto** per il modello di questo run, in µUSD per milione di token.
+   * The price **resolved** for this run's model, in µUSD per million tokens.
    *
-   * Si registra il prezzo effettivo e non la tabella: è ciò che ha determinato la
-   * spesa, e un replay che ricalcolasse con prezzi diversi produrrebbe una spesa
-   * diversa e si fermerebbe a un passo diverso.
+   * The effective price is recorded, not the table: it is what determined the spend,
+   * and a replay that recomputed with different prices would produce a different
+   * spend and stop at a different step.
    */
   readonly price: { readonly input: number; readonly output: number };
 }
 
-/** Tutti gli eventi che un run può produrre. */
+/** Every event a run can produce. */
 export type TraceEvent =
   | (TraceBase & {
       type: 'run.start';
@@ -66,26 +64,26 @@ export type TraceEvent =
   | (TraceBase & { type: 'budget.settle'; step: number; reserved: number; actual: number })
   | (TraceBase & { type: 'run.end'; steps: number; stopReason: StopReason; spent: number; spentUsd: string });
 
-/** Una chiamata a tool, con gli argomenti già passati da `toTraceable`. */
+/** A tool call, with arguments already run through `toTraceable`. */
 export interface TraceableToolCall {
   readonly id: string;
   readonly name: string;
   readonly args: unknown;
 }
 
-/** Esito di un tool, in forma tracciabile. */
+/** Outcome of a tool, in traceable form. */
 export type ToolOutcomeTrace =
   | { readonly ok: true; readonly output: unknown }
   | { readonly ok: false; readonly failure: ToolFailure };
 
-/** Come si presenta un valore che si è deciso di non scrivere. */
+/** How a value we decided not to write looks. */
 export interface Redacted {
   readonly redacted: true;
-  /** Byte stimati del valore originale: serve per capire quanto era grande. */
+  /** Estimated bytes of the original value: it tells how big it was. */
   readonly bytes: number;
 }
 
-/** Come si presenta un valore troncato. */
+/** How a truncated value looks. */
 export interface Truncated {
   readonly truncated: true;
   readonly bytes: number;
@@ -93,28 +91,28 @@ export interface Truncated {
 }
 
 /**
- * `Omit` distribuito sulle unioni.
+ * `Omit` distributed over unions.
  *
- * Il `Omit` di TypeScript applicato a una unione **non** distribuisce: si applica
- * all'unione nel suo complesso e ne cancella le chiavi che non sono comuni a tutte
- * le varianti. `Omit<TraceEvent, 'seq' | 'ts'>` diventerebbe `{ type: string }` e
- * `append({ type: 'step.start', step: 0 })` non compilerebbe. Qui ogni variante
- * perde i propri due campi e le altre chiavi restano intatte.
+ * TypeScript's `Omit` applied to a union does **not** distribute: it applies to the
+ * union as a whole and deletes the keys that are not common to every variant.
+ * `Omit<TraceEvent, 'seq' | 'ts'>` would become `{ type: string }` and
+ * `append({ type: 'step.start', step: 0 })` would not compile. Here every variant
+ * loses its own two fields and the other keys stay intact.
  */
 type DistributiveOmit<T, K extends keyof never> = T extends unknown ? Omit<T, K> : never;
 
-/** Un evento come lo fornisce il chiamante: senza `seq`, che assegna la traccia. */
+/** An event as the caller provides it: without `seq`, which the trace assigns. */
 export type TraceInput = DistributiveOmit<TraceEvent, 'seq' | 'ts'>;
 
-/** Soglia oltre la quale un valore viene tagliato. 64 KiB: abbondante per un tool. */
+/** Threshold above which a value is cut. 64 KiB: plenty for a tool. */
 export const MAX_TRACE_VALUE_BYTES = 64 * 1024;
 
 /**
- * Converte qualsiasi valore in qualcosa di scrivibile in JSON, senza fallire mai.
+ * Converts any value into something JSON-writable, never failing.
  *
- * Un `Error` diventa `{ name, message }`: il resto dello stack è rumore per la
- * traccia e spesso contiene path assoluti. I valori non serializzabili diventano
- * la loro descrizione tipo, marcata come degradata.
+ * An `Error` becomes `{ name, message }`: the rest of the stack is noise for the
+ * trace and often contains absolute paths. Non-serializable values become their
+ * type description, marked as degraded.
  */
 export function toTraceable(value: unknown): unknown {
   return encode(value, new WeakSet(), 0);
@@ -133,12 +131,12 @@ function encode(value: unknown, seen: WeakSet<object>, depth: number): unknown {
     return Number.isFinite(value) ? value : { degraded: `number: ${String(value)}` };
   }
   if (typeof value === 'bigint') return { degraded: `bigint: ${value.toString()}` };
-  if (typeof value === 'function') return { degraded: `function: ${value.name === '' ? 'anonima' : value.name}` };
-  if (typeof value === 'symbol') return { degraded: `symbol: ${value.description ?? 'senza descrizione'}` };
+  if (typeof value === 'function') return { degraded: `function: ${value.name === '' ? 'anonymous' : value.name}` };
+  if (typeof value === 'symbol') return { degraded: `symbol: ${value.description ?? 'no description'}` };
 
   const object: object = value;
-  if (seen.has(object)) return { degraded: 'ciclo' };
-  if (depth > 12) return { degraded: 'profondità massima' };
+  if (seen.has(object)) return { degraded: 'cycle' };
+  if (depth > 12) return { degraded: 'maximum depth' };
 
   seen.add(object);
   try {
@@ -162,7 +160,7 @@ function encode(value: unknown, seen: WeakSet<object>, depth: number): unknown {
   }
 }
 
-/** Applica la ridazione a un valore, restituendo solo la sua dimensione. */
+/** Applies redaction to a value, returning only its size. */
 export function redact(value: unknown): Redacted {
   let bytes = 0;
   try {
@@ -174,10 +172,10 @@ export function redact(value: unknown): Redacted {
 }
 
 /**
- * Prepara un valore per la traccia: ridazione se richiesta, troncamento se grande.
+ * Prepares a value for the trace: redaction when requested, truncation when big.
  *
- * I due controlli sono in quest'ordine perché il ridatto non va troncato: dire
- * "questo era enorme" è un fatto utile, dirlo a metà no.
+ * The two checks are in this order because a redacted value must not be truncated:
+ * saying "this was huge" is a useful fact, saying it halfway is not.
  */
 export function prepareForTrace(
   value: unknown,
@@ -190,7 +188,7 @@ export function prepareForTrace(
   try {
     json = JSON.stringify(safe);
   } catch {
-    return { degraded: 'non serializzabile' };
+    return { degraded: 'not serializable' };
   }
   const bytes = Buffer.byteLength(json, 'utf8');
   if (bytes <= MAX_TRACE_VALUE_BYTES) return safe;
@@ -199,11 +197,11 @@ export function prepareForTrace(
 }
 
 /**
- * Il log in sola aggiunta.
+ * The append-only log.
  *
- * "In sola aggiunta" è una proprietà strutturale, non una promessa: esiste solo
- * `append`, non esiste `remove` né `update`. Un test può riordinare il codice e
- * ritrovarsi con un edit di una traccia esistente solo cercandolo, e non lo troverà.
+ * "Append-only" is a structural property, not a promise: only `append` exists,
+ * neither `remove` nor `update` do. A test can rearrange the code and end up editing
+ * an existing trace only by looking for it, and it will not find it.
  */
 export class Trace {
   readonly #events: TraceEvent[] = [];
@@ -213,7 +211,7 @@ export class Trace {
     this.#clock = options.clock ?? Date.now;
   }
 
-  /** Aggiunge un evento. Il `seq` è assegnato qui e non è negoziabile. */
+  /** Adds an event. The `seq` is assigned here and is not negotiable. */
   append(event: TraceInput): TraceEvent {
     const full = { ...event, seq: this.#events.length, ts: this.#clock() } as TraceEvent;
     this.#events.push(full);
@@ -228,22 +226,22 @@ export class Trace {
     return this.#events.length;
   }
 
-  /** Gli eventi di un tipo, in ordine. */
+  /** The events of one type, in order. */
   of<T extends TraceEvent['type']>(type: T): Extract<TraceEvent, { type: T }>[] {
     return this.#events.filter((event): event is Extract<TraceEvent, { type: T }> => event.type === type);
   }
 
-  /** Ultimo evento, se c'è. */
+  /** Last event, if any. */
   get last(): TraceEvent | undefined {
     return this.#events.at(-1);
   }
 
-  /** Serializza in JSONL: un evento per riga, nessuna riga vuota in coda. */
+  /** Serializes to JSONL: one event per line, no trailing empty line. */
   toJSONL(): string {
     return this.#events.map((event) => JSON.stringify(event)).join('\n');
   }
 
-  /** Rilegge da JSONL. Una riga malformata è un errore, non un buco silenzioso. */
+  /** Reads back from JSONL. A malformed line is an error, not a silent hole. */
   static parse(source: string): Trace {
     const trace = new Trace({ clock: () => 0 });
     const lines = source.split('\n').filter((line) => line.trim() !== '');
@@ -251,40 +249,40 @@ export class Trace {
       try {
         trace.#events.push(JSON.parse(line) as TraceEvent);
       } catch (error) {
-        throw new SyntaxError(`riga ${index + 1} della traccia non è JSON valido: ${String(error)}`);
+        throw new SyntaxError(`trace line ${index + 1} is not valid JSON: ${String(error)}`);
       }
     }
     return trace;
   }
 
   /**
-   * La proiezione confrontabile: due run della stessa conversazione devono produrre
-   * proiezioni identiche.
+   * The comparable projection: two runs of the same conversation must produce
+   * identical projections.
    *
-   * Sono esclusi **due** campi, ed entrambi per costruzione, non per comodità:
+   * **Two** fields are excluded, and both by construction, not for convenience:
    *
-   * - `ts`: due esecuzioni hanno tempi diversi per definizione.
-   * - `tool.call.fingerprint`: nel replay il tool è una **ricostruzione** con un
-   *   corpo diverso, quindi la sua impronta è diversa per costruzione. Escluderlo qui
-   *   non significa ignorare che il tool sia cambiato: quel controllo è un altro, e
-   *   più severo — è l'avviso di ADR 0003, che guarda il tool **vero** contro
-   *   l'impronta registrata e non lo lascia mai passare in silenzio.
+   * - `ts`: two executions have different times by definition.
+   * - `tool.call.fingerprint`: during replay the tool is a **reconstruction** with a
+   *   different body, so its fingerprint differs by construction. Excluding it here
+   *   does not mean ignoring that the tool changed: that check is a different one, and
+   *   a stricter one — it is the ADR 0003 warning, which compares the **real** tool
+   *   against the recorded fingerprint and never lets it through silently.
    *
-   * `seq` resta, perché indica la posizione e quella deve coincidere.
+   * `seq` stays, because it marks the position and that must match.
    */
   normalized(): unknown[] {
     return this.#events.map((event) => {
       const { ts: _ts, ...rest } = event;
       if (rest.type === 'tool.call') {
-        const { fingerprint: _fingerprint, ...senza } = rest;
-        return senza;
+        const { fingerprint: _fingerprint, ...withoutFingerprint } = rest;
+        return withoutFingerprint;
       }
       return rest;
     });
   }
 }
 
-/** Costruisce una `TraceableToolCall` da una `ToolCall`, passando per la ridazione. */
+/** Builds a `TraceableToolCall` from a `ToolCall`, going through redaction. */
 export function traceableCall(call: ToolCall, sensitive: boolean): TraceableToolCall {
   return { id: call.id, name: call.name, args: prepareForTrace(call.args, { sensitive }) };
 }

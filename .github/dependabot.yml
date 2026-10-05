@@ -4,10 +4,10 @@ updates:
     directory: /
     schedule: { interval: weekly }
     open-pull-requests-limit: 5
-    # Gli aggiornamenti minor e patch si mergiano se la CI è verde. Le **major**
-    # no: uno major di TypeScript o di un linter non è un bump, è una decisione che
-    # spetta a una persona. Un PR di major fallito tutte le settimane è rumore che
-    # copre i PR veri.
+    # Minor and patch updates are merged if CI is green. **Major** ones are not:
+    # a major of TypeScript or of a linter is not a bump, it is a decision that
+    # belongs to a person. A failed major PR every week is noise that covers the
+    # real PRs.
     versioning-strategy: increase
     ignore:
       - dependency-name: typescript

@@ -1,21 +1,20 @@
 /**
- * Il replay: rifare un run da una traccia, senza rete e senza provider.
+ * Replay: redoing a run from a trace, with no network and no provider.
  *
- * È la promessa di ADR 0001 resa eseguibile, e dipende interamente dal fatto che la
- * `Policy` e i `Tool` siano interfacce: qui non c'è un secondo percorso di codice da
- * mantenere, c'è lo stesso loop con dentro una `Policy` che legge da disco.
+ * It is the promise of ADR 0001 made executable, and it depends entirely on the fact
+ * that `Policy` and `Tool` are interfaces: here there is no second code path to
+ * maintain, there is the same loop with a `Policy` that reads from disk inside it.
  *
- * Tre modalità, dichiarate da chi chiama (ADR 0003):
+ * Three modes, declared by the caller (ADR 0003):
  *
- * | modalità     | policy     | tool        | per cosa serve                        |
- * |--------------|------------|-------------|---------------------------------------|
- * | `full`       | dalla traccia | dalla traccia | test di regressione sul loop, offline |
- * | `live-tools` | dalla traccia | veri         | "cosa cambia se il tool cambia?"      |
- * | `dry-run`    | dalla traccia | saltati      | quanto del run dipende dai tool?      |
+ * | mode         | policy       | tool          | what it is for                        |
+ * |--------------|--------------|---------------|---------------------------------------|
+ * | `full`       | from trace   | from trace    | regression tests on the loop, offline |
+ * | `live-tools` | from trace   | real ones     | "what changes if the tool changes?"   |
+ * | `dry-run`    | from trace   | skipped       | how much of the run depends on tools? |
  *
- * In `full` e `dry-run` non viene eseguito nessun codice di tool: l'output arriva
- * dalla traccia. È il motivo per cui il replay funziona anche per un tool che chiama
- * un servizio ormai cancellato.
+ * In `full` and `dry-run` no tool code is executed: the output comes from the trace.
+ * That is why replay works even for a tool that calls a service that no longer exists.
  */
 
 import { Budget, type Price } from './budget.js';
@@ -25,10 +24,10 @@ import { Trace, type ToolOutcomeTrace } from './trace.js';
 import { ReplayedFailure, ToolRegistry } from './tool.js';
 import type { AnyTool, Policy, PolicyOutcome } from './types.js';
 
-/** Come trattare i tool durante il replay. */
+/** How to treat tools during replay. */
 export type ReplayMode = 'full' | 'live-tools' | 'dry-run';
 
-/** Qualcosa che il replay ha notato e che merita di essere detto. */
+/** Something replay noticed and that deserves to be said. */
 export interface ReplayWarning {
   readonly kind: 'tool_changed' | 'tool_missing' | 'extra_tool';
   readonly tool: string;
@@ -36,32 +35,32 @@ export interface ReplayWarning {
 }
 
 export interface ReplayOptions {
-  /** I tool veri. Obbligatori solo in `live-tools`, dove vengono davvero eseguiti. */
+  /** The real tools. Required only in `live-tools`, where they are actually executed. */
   readonly tools?: ToolRegistry;
-  /** Modalità. Di default `full`. */
+  /** Mode. Defaults to `full`. */
   readonly mode?: ReplayMode;
   /**
-   * Se `true` (default), la traccia prodotta viene confrontata con l'originale e
-   * `equal` dice se combaciano. Serve perché un replay che "riproduce" ma produce
-   * qualcos'altro è peggio di un replay che fallisce rumorosamente.
+   * If `true` (default), the produced trace is compared with the original one and
+   * `equal` says whether they match. Needed because a replay that "reproduces" but
+   * produces something else is worse than a replay that fails loudly.
    */
   readonly compare?: boolean;
   readonly signal?: AbortSignal;
 }
 
 export interface ReplayResult {
-  /** Il run rifatto. */
+  /** The run redone. */
   readonly result: RunResult;
-  /** Cosa non combacia, o cosa è cambiato nel frattempo. */
+  /** What does not match, or what changed in the meantime. */
   readonly warnings: ReplayWarning[];
-  /** `true` se la traccia del replay coincide con quella originale, modulo il tempo. */
+  /** `true` if the replay trace matches the original one, modulo time. */
   readonly equal: boolean;
 }
 
 /**
- * Rifà un run da una traccia.
+ * Redoes a run from a trace.
  *
- * @param source la traccia, o il suo JSONL.
+ * @param source the trace, or its JSONL.
  */
 export async function replay(
   source: Trace | string,
@@ -71,7 +70,7 @@ export async function replay(
   const mode = options.mode ?? 'full';
   const start = original.of('run.start')[0];
   if (start === undefined) {
-    throw new ReplayMismatchError(0, 'la traccia non contiene un run.start: non è una traccia di run');
+    throw new ReplayMismatchError(0, 'the trace does not contain a run.start: it is not a run trace');
   }
 
   const warnings = diffTools(original, options.tools);
@@ -82,17 +81,17 @@ export async function replay(
     policy,
     messages: start.messages,
     tools: registry,
-    // gli stessi parametri della run originale: un replay con un tetto diverso
-    // si fermerebbe a un passo diverso e non starebbe confrontando la stessa cosa
+    // the same parameters as the original run: a replay with a different cap would
+    // stop at a different step and would not be comparing the same thing
     budget: new Budget(start.parameters.budgetLimit as never),
     maxSteps: start.parameters.maxSteps,
     stepAllowance: start.parameters.stepAllowance as never,
-    // il prezzo è quello **risolto** nella run originale: ricalcolarlo con una tabella
-    // diversa cambierebbe la spesa e il replay si fermerebbe a un passo diverso
+    // the price is the one **resolved** in the original run: recomputing it with a
+    // different table would change the spend and the replay would stop at a different step
     prices: { [policy.model]: start.parameters.price as Price },
     trace: new Trace(),
-    // stesso runId della run originale: il replay *è* quella run, non una nuova.
-    // la provenienza del replay sta in ReplayResult, non dentro la traccia.
+    // same runId as the original run: the replay *is* that run, not a new one.
+    // the provenance of the replay lives in ReplayResult, not inside the trace.
     runId: start.runId,
     ...(options.signal === undefined ? {} : { signal: options.signal }),
   };
@@ -103,45 +102,44 @@ export async function replay(
 }
 
 /**
- * Una `Policy` che risponde con le decisioni registrate.
+ * A `Policy` that answers with the recorded decisions.
  *
- * Fallisce se la traccia finisce prima: significa che il replay sta chiedendo una
- * decisione in più di quante la run originale ne aveva prese, il che è un bug del
- * loop o una traccia troncata. In entrambi i casi, dirlo adesso vale più che
- * inventare una risposta.
+ * It fails if the trace ends early: it means the replay is asking for one more
+ * decision than the original run had taken, which is a loop bug or a truncated trace.
+ * Either way, saying it now is worth more than inventing an answer.
  */
 function recordedPolicy(original: Trace): Policy {
-  const risposte = original.of('policy.response');
-  let indice = 0;
+  const responses = original.of('policy.response');
+  let index = 0;
   return {
-    // il modello è quello della prima risposta registrata: serve al prezzo
-    model: risposte[0]?.model ?? 'registrato',
+    // the model is that of the first recorded response: the price needs it
+    model: responses[0]?.model ?? 'recorded',
     decide: (): Promise<PolicyOutcome> => {
-      const risposta = risposte[indice++];
-      if (risposta === undefined) {
+      const response = responses[index++];
+      if (response === undefined) {
         return Promise.reject(
           new ReplayMismatchError(
-            indice - 1,
-            `la traccia ha ${risposte.length} risposte ma il replay ne ha chiesto ${indice}: il loop è cambiato`,
+            index - 1,
+            `the trace has ${responses.length} responses but the replay asked for ${index}: the loop changed`,
           ),
         );
       }
       return Promise.resolve({
-        decision: risposta.decision,
-        usage: risposta.usage,
-        model: risposta.model,
+        decision: response.decision,
+        usage: response.usage,
+        model: response.model,
       });
     },
   };
 }
 
 /**
- * Il registro da usare nel replay.
+ * The registry to use during replay.
  *
- * In `live-tools` è il registro vero e non se ne parla. Altrimenti ogni tool viene
- * sostituito da uno che restituisce ciò che era stato registrato, o che **solleva**
- * l'errore registrato quando la run originale era fallita: è così che il ciclo di
- * autocorrezione del modello si riproduce, e non si riproduce solo il caso felice.
+ * In `live-tools` it is the real registry and that is the end of it. Otherwise every
+ * tool is replaced by one that returns what had been recorded, or that **throws** the
+ * recorded error when the original run had failed: that is how the model's
+ * self-correction loop is reproduced, instead of reproducing only the happy case.
  */
 function buildRegistry(
   original: Trace,
@@ -151,58 +149,58 @@ function buildRegistry(
 ): ToolRegistry {
   if (mode === 'live-tools') {
     if (real === undefined) {
-      throw new TypeError('la modalità live-tools richiede i tool veri: senza, non è un replay');
+      throw new TypeError('live-tools mode requires the real tools: without them it is not a replay');
     }
     return real;
   }
 
-  const risultati = new Map<string, ToolOutcomeTrace>();
-  for (const evento of original.of('tool.result')) {
-    // se un tool è stato chiamato più volte, l'ultimo risultato non basta:
-    // si accetta e si dichiara, perché una ricostruzione sbagliata è peggio di nessuna
-    risultati.set(`${evento.step}/${evento.tool}`, evento.outcome);
+  const results = new Map<string, ToolOutcomeTrace>();
+  for (const event of original.of('tool.result')) {
+    // if a tool was called more than once, the last result is not enough:
+    // it is accepted and stated, because a wrong reconstruction is worse than none
+    results.set(`${event.step}/${event.tool}`, event.outcome);
   }
 
   const fake = new ToolRegistry();
-  for (const evento of original.of('tool.call')) {
-    const nome = evento.call.name;
-    if (fake.has(nome)) continue; // un tool per nome: lo schema non può cambiare in corsa
+  for (const event of original.of('tool.call')) {
+    const name = event.call.name;
+    if (fake.has(name)) continue; // one tool per name: the schema cannot change mid-run
 
-    // se un tool è stato chiamato più volte, si usa il primo esito registrato:
-    // non è la ricostruzione esatta, ed è per questo che l'impronta nel confronto
-    // fra tool dice quando il replay non è più attendibile
-    const esito = risultati.get(`${evento.step}/${nome}`) ?? primoPerTool(risultati, nome);
-    const spec = real?.get(nome);
+    // if a tool was called more than once, the first recorded outcome is used:
+    // it is not the exact reconstruction, and that is why the fingerprint in the
+    // tool comparison says when the replay is no longer trustworthy
+    const outcome = results.get(`${event.step}/${name}`) ?? firstForTool(results, name);
+    const spec = real?.get(name);
 
-    const ricostruito: AnyTool = {
-      name: nome,
-      description: spec?.description ?? `tool ${nome} ricostruito dalla traccia`,
+    const reconstructed: AnyTool = {
+      name,
+      description: spec?.description ?? `tool ${name} reconstructed from the trace`,
       schema: spec?.schema ?? { type: 'object' },
       execute: (): unknown => {
-        if (esito === undefined) {
-          // nessun esito registrato: si riproduce il fallimento neutro, che è
-          // quello che il modello aveva visto davvero
+        if (outcome === undefined) {
+          // no recorded outcome: the neutral failure is reproduced, which is
+          // what the model had actually seen
           throw new ReplayedFailure({
             kind: 'execution_failed',
             message:
-              `Il tool "${nome}" è fallito con un errore interno (vedi la traccia per la causa). ` +
-              `Non riprovare più di una volta con gli stessi argomenti; se fallisce ancora, ` +
-              `dillo all'utente e proponi un percorso alternativo.`,
+              `Tool "${name}" failed with an internal error (see the trace for the cause). ` +
+              `Do not retry more than once with the same arguments; if it fails again, ` +
+              `tell the user and propose an alternative path.`,
           });
         }
-        if (!esito.ok) throw new ReplayedFailure(esito.failure);
-        return esito.output;
+        if (!outcome.ok) throw new ReplayedFailure(outcome.failure);
+        return outcome.output;
       },
     };
 
     try {
-      fake.add(ricostruito);
+      fake.add(reconstructed);
     } catch (error) {
-      // uno schema non più supportato non deve far fallire il replay: si registra
+      // a schema that is no longer supported must not make the replay fail: it is recorded
       warnings.push({
         kind: 'tool_changed',
-        tool: nome,
-        message: `non è stato possibile ricostruire il tool "${nome}": ${String(error)}`,
+        tool: name,
+        message: `could not reconstruct tool "${name}": ${String(error)}`,
       });
     }
   }
@@ -210,65 +208,65 @@ function buildRegistry(
   return fake;
 }
 
-/** Il primo esito registrato per un tool, a qualunque passo. */
-function primoPerTool(risultati: ReadonlyMap<string, ToolOutcomeTrace>, nome: string): ToolOutcomeTrace | undefined {
-  for (const [chiave, esito] of risultati) {
-    if (chiave.endsWith(`/${nome}`)) return esito;
+/** The first recorded outcome for a tool, at any step. */
+function firstForTool(results: ReadonlyMap<string, ToolOutcomeTrace>, name: string): ToolOutcomeTrace | undefined {
+  for (const [key, outcome] of results) {
+    if (key.endsWith(`/${name}`)) return outcome;
   }
   return undefined;
 }
 
 /**
- * Confronta i tool registrati nella traccia con quelli disponibili adesso.
+ * Compares the tools recorded in the trace with those available now.
  *
- * È qui che una traccia che mente si smaschera (ADR 0003): se il codice di un tool è
- * cambiato, i risultati registrati non descrivono più il suo comportamento e il
- * replay deve dirlo invece di fingere che sia andato tutto bene.
+ * This is where a trace that lies unmasks itself (ADR 0003): if a tool's code changed,
+ * the recorded results no longer describe its behavior and replay must say so instead
+ * of pretending everything went fine.
  */
 function diffTools(original: Trace, real: ToolRegistry | undefined): ReplayWarning[] {
-  const avvisi: ReplayWarning[] = [];
-  if (real === undefined) return avvisi;
+  const warnings: ReplayWarning[] = [];
+  if (real === undefined) return warnings;
 
   const recorded = new Map<string, string | undefined>();
-  for (const evento of original.of('tool.call')) {
-    recorded.set(evento.call.name, evento.fingerprint);
+  for (const event of original.of('tool.call')) {
+    recorded.set(event.call.name, event.fingerprint);
   }
 
-  for (const [nome, fingerprint] of recorded) {
-    const attuale = real.fingerprint(nome);
-    if (attuale === undefined) {
-      avvisi.push({
+  for (const [name, fingerprint] of recorded) {
+    const current = real.fingerprint(name);
+    if (current === undefined) {
+      warnings.push({
         kind: 'tool_missing',
-        tool: nome,
-        message: `il tool "${nome}" è nella traccia ma non è registrato`,
+        tool: name,
+        message: `tool "${name}" is in the trace but is not registered`,
       });
       continue;
     }
-    if (fingerprint !== undefined && fingerprint !== attuale) {
-      avvisi.push({
+    if (fingerprint !== undefined && fingerprint !== current) {
+      warnings.push({
         kind: 'tool_changed',
-        tool: nome,
+        tool: name,
         message:
-          `il tool "${nome}" è cambiato dalla run registrata (impronta ${fingerprint} → ${attuale}): ` +
-          `il risultato in traccia può non descrivere più il suo comportamento`,
+          `tool "${name}" changed since the recorded run (fingerprint ${fingerprint} → ${current}): ` +
+          `the result in the trace may no longer describe its behavior`,
       });
     }
   }
 
-  for (const nome of real.names()) {
-    if (!recorded.has(nome)) {
-      avvisi.push({
+  for (const name of real.names()) {
+    if (!recorded.has(name)) {
+      warnings.push({
         kind: 'extra_tool',
-        tool: nome,
-        message: `il tool "${nome}" esiste adesso ma non è stato usato nella run registrata`,
+        tool: name,
+        message: `tool "${name}" exists now but was not used in the recorded run`,
       });
     }
   }
 
-  return avvisi;
+  return warnings;
 }
 
-/** Due tracce sono la stessa run se coincidono modulo il tempo. */
+/** Two traces are the same run if they match modulo time. */
 function sameTrace(a: Trace, b: Trace): boolean {
   const left = a.normalized();
   const right = b.normalized();
