@@ -6,130 +6,130 @@ import type { ToolSpec } from '../src/types.js';
 
 const spec: ToolSpec[] = [
   {
-    name: 'cerca_voli',
-    description: 'Cerca voli.',
-    schema: { type: 'object', properties: { da: { type: 'string' } }, required: ['da'] },
+    name: 'search_flights',
+    description: 'Searches flights.',
+    schema: { type: 'object', properties: { from: { type: 'string' } }, required: ['from'] },
   },
 ];
 
-const risposta = (corpo: unknown, init: ResponseInit = {}): Response =>
-  new Response(JSON.stringify(corpo), { status: 200, headers: { 'content-type': 'application/json' }, ...init });
+const response = (body: unknown, init: ResponseInit = {}): Response =>
+  new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' }, ...init });
 
 describe('interpret', () => {
-  it('una risposta testuale diventa una decisione di messaggio', () => {
-    const esito = interpret({ model: 'gpt-4o-mini', choices: [{ message: { content: 'ciao' } }], usage: { prompt_tokens: 10, completion_tokens: 3 } });
-    expect(esito).toEqual({
-      decision: { type: 'message', content: 'ciao' },
+  it('a text response becomes a message decision', () => {
+    const outcome = interpret({ model: 'gpt-4o-mini', choices: [{ message: { content: 'hello' } }], usage: { prompt_tokens: 10, completion_tokens: 3 } });
+    expect(outcome).toEqual({
+      decision: { type: 'message', content: 'hello' },
       usage: { inputTokens: 10, outputTokens: 3 },
       model: 'gpt-4o-mini',
     });
   });
 
-  it('una tool call diventa una decisione di tool, con gli argomenti già parsati', () => {
-    const esito = interpret({
+  it('a tool call becomes a tool decision, with the arguments already parsed', () => {
+    const outcome = interpret({
       model: 'gpt-4o-mini',
       choices: [
         {
           finish_reason: 'tool_calls',
-          message: { tool_calls: [{ id: 'call_1', function: { name: 'cerca_voli', arguments: '{"da":"NAP"}' } }] },
+          message: { tool_calls: [{ id: 'call_1', function: { name: 'search_flights', arguments: '{"from":"NAP"}' } }] },
         },
       ],
       usage: { prompt_tokens: 20, completion_tokens: 8 },
     });
 
-    expect(esito.decision).toEqual({
+    expect(outcome.decision).toEqual({
       type: 'tool',
-      call: { id: 'call_1', name: 'cerca_voli', args: { da: 'NAP' } },
+      call: { id: 'call_1', name: 'search_flights', args: { from: 'NAP' } },
     });
-    expect(esito.usage).toEqual({ inputTokens: 20, outputTokens: 8 });
+    expect(outcome.usage).toEqual({ inputTokens: 20, outputTokens: 8 });
   });
 
-  it('una risposta vuota è un errore, non una risposta vuota', () => {
-    // chiudere il run con un answer vuoto sembrerebbe una risposta: peggio che fallire
+  it('an empty response is an error, not an empty answer', () => {
+    // closing the run with an empty answer would look like an answer: worse than failing
     expect(() => interpret({ choices: [{ finish_reason: 'stop', message: { content: '' } }] })).toThrow(PolicyError);
-    expect(() => interpret({ choices: [{ message: { content: '   ' } }] })).toThrow(/vuota/);
+    expect(() => interpret({ choices: [{ message: { content: '   ' } }] })).toThrow(/empty/);
   });
 
-  it('una risposta senza scelte è un errore', () => {
-    expect(() => interpret({ choices: [] })).toThrow(/senza scelte/);
-    expect(() => interpret({})).toThrow(/senza scelte/);
+  it('a response with no choices is an error', () => {
+    expect(() => interpret({ choices: [] })).toThrow(/no choices/);
+    expect(() => interpret({})).toThrow(/no choices/);
   });
 
-  it('argomenti non JSON sono un errore del provider, non un fallback silenzioso', () => {
-    // un fallback qui passerebbe {} al tool, che farebbe qualcosa di diverso
-    // da quello che il modello voleva
+  it('non-JSON arguments are a provider error, not a silent fallback', () => {
+    // a fallback here would pass {} to the tool, which would do something different
+    // from what the model wanted
     expect(() =>
-      interpret({ choices: [{ message: { tool_calls: [{ id: 'c', function: { name: 'x', arguments: '{da:' } }] } }] }),
-    ).toThrow(/non sono JSON valido/);
+      interpret({ choices: [{ message: { tool_calls: [{ id: 'c', function: { name: 'x', arguments: '{from:' } }] } }] }),
+    ).toThrow(/not valid JSON/);
   });
 
-  it('una tool call senza nome non viene inventata', () => {
+  it('a tool call with no name is not invented', () => {
     expect(() =>
       interpret({ choices: [{ message: { tool_calls: [{ id: 'c', function: {} }] } }] }),
-    ).toThrow(/senza nome/);
+    ).toThrow(/no name/);
   });
 
-  it('usage assente vale zero, non undefined', () => {
-    const esito = interpret({ choices: [{ message: { content: 'x' } }] });
-    expect(esito.usage).toEqual({ inputTokens: 0, outputTokens: 0 });
+  it('a missing usage is worth zero, not undefined', () => {
+    const outcome = interpret({ choices: [{ message: { content: 'x' } }] });
+    expect(outcome.usage).toEqual({ inputTokens: 0, outputTokens: 0 });
   });
 });
 
 describe('openAICompatible', () => {
   const base = { model: 'gpt-4o-mini', apiKey: 'k' };
 
-  it('dichiiara il modello: è ciò che rende possibile il budget', () => {
+  it('declares the model: that is what makes the budget possible', () => {
     expect(openAICompatible(base).model).toBe('gpt-4o-mini');
   });
 
-  it('traduce messaggi e tool nel formato del provider', async () => {
-    let corpo: Record<string, unknown> = {};
+  it('translates messages and tools into the provider format', async () => {
+    let body: Record<string, unknown> = {};
     const policy = openAICompatible({
       ...base,
       fetch: async (_url, init) => {
-        corpo = JSON.parse((init?.body ?? '') as string) as Record<string, unknown>;
-        return risposta({ model: 'gpt-4o-mini', choices: [{ message: { content: 'ok' } }] });
+        body = JSON.parse((init?.body ?? '') as string) as Record<string, unknown>;
+        return response({ model: 'gpt-4o-mini', choices: [{ message: { content: 'ok' } }] });
       },
     });
 
-    await policy.decide({ messages: [{ role: 'user', content: 'ciao' }], tools: spec });
-    expect(corpo.model).toBe('gpt-4o-mini');
-    expect(corpo.tools).toEqual([
-      { type: 'function', function: { name: 'cerca_voli', description: 'Cerca voli.', parameters: spec[0]?.schema } },
+    await policy.decide({ messages: [{ role: 'user', content: 'hello' }], tools: spec });
+    expect(body.model).toBe('gpt-4o-mini');
+    expect(body.tools).toEqual([
+      { type: 'function', function: { name: 'search_flights', description: 'Searches flights.', parameters: spec[0]?.schema } },
     ]);
-    expect(corpo.tool_choice).toBe('auto');
+    expect(body.tool_choice).toBe('auto');
   });
 
-  it('senza tool non chiede tool_choice', async () => {
-    let corpo: Record<string, unknown> = {};
+  it('with no tools it does not ask for tool_choice', async () => {
+    let body: Record<string, unknown> = {};
     const policy = openAICompatible({
       ...base,
       fetch: async (_url, init) => {
-        corpo = JSON.parse((init?.body ?? '') as string) as Record<string, unknown>;
-        return risposta({ choices: [{ message: { content: 'ok' } }] });
+        body = JSON.parse((init?.body ?? '') as string) as Record<string, unknown>;
+        return response({ choices: [{ message: { content: 'ok' } }] });
       },
     });
-    await policy.decide({ messages: [{ role: 'user', content: 'ciao' }], tools: [] });
-    expect(corpo.tool_choice).toBeUndefined();
+    await policy.decide({ messages: [{ role: 'user', content: 'hello' }], tools: [] });
+    expect(body.tool_choice).toBeUndefined();
   });
 
-  it('un messaggio di tool viaggia con il suo tool_call_id', async () => {
-    let corpo: { messages: Record<string, unknown>[] } = { messages: [] };
+  it('a tool message travels with its tool_call_id', async () => {
+    let body: { messages: Record<string, unknown>[] } = { messages: [] };
     const policy = openAICompatible({
       ...base,
       fetch: async (_url, init) => {
-        corpo = JSON.parse((init?.body ?? '') as string) as { messages: Record<string, unknown>[] };
-        return risposta({ choices: [{ message: { content: 'ok' } }] });
+        body = JSON.parse((init?.body ?? '') as string) as { messages: Record<string, unknown>[] };
+        return response({ choices: [{ message: { content: 'ok' } }] });
       },
     });
     await policy.decide({
-      messages: [{ role: 'tool', tool_call_id: 'call_1', name: 'cerca_voli', content: '90 euro' }],
+      messages: [{ role: 'tool', tool_call_id: 'call_1', name: 'search_flights', content: '90 euros' }],
       tools: [],
     });
-    expect(corpo.messages[0]).toEqual({ role: 'tool', tool_call_id: 'call_1', name: 'cerca_voli', content: '90 euro' });
+    expect(body.messages[0]).toEqual({ role: 'tool', tool_call_id: 'call_1', name: 'search_flights', content: '90 euros' });
   });
 
-  it('un errore HTTP porta il corpo del provider, troncato', async () => {
+  it('an HTTP error carries the provider body, truncated', async () => {
     const policy = openAICompatible({
       ...base,
       fetch: async () =>
@@ -140,7 +140,7 @@ describe('openAICompatible', () => {
     );
   });
 
-  it('un errore di rete è un PolicyError, non un’eccezione raw', async () => {
+  it('a network error is a PolicyError, not a raw exception', async () => {
     const policy = openAICompatible({
       ...base,
       fetch: async () => {
@@ -150,27 +150,27 @@ describe('openAICompatible', () => {
     await expect(policy.decide({ messages: [{ role: 'user', content: 'x' }], tools: [] })).rejects.toThrow(PolicyError);
   });
 
-  it('l’annullamento del chiamante chiude davvero la richiesta in volo', async () => {
+  it('caller cancellation really closes the in-flight request', async () => {
     const controller = new AbortController();
     const policy = openAICompatible({
       ...base,
       fetch: async (_url, init) =>
         new Promise((_resolve, reject) => {
-          // un fetch vero che aspetta: si stacca solo quando il segnale scatta
+          // a real fetch that waits: it detaches only when the signal fires
           init?.signal?.addEventListener('abort', () => reject(new Error('aborted')));
         }),
     });
 
-    const inCorso = policy.decide({
+    const inFlight = policy.decide({
       messages: [{ role: 'user', content: 'x' }],
       tools: [],
       signal: controller.signal,
     });
     controller.abort();
-    await expect(inCorso).rejects.toThrow(/annullata dal chiamante/);
+    await expect(inFlight).rejects.toThrow(/cancelled by the caller/);
   });
 
-  it('il timeout chiude la richiesta entro il tempo dato', async () => {
+  it('the timeout closes the request within the given time', async () => {
     const policy = openAICompatible({
       ...base,
       timeoutMs: 10,

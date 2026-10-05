@@ -7,9 +7,9 @@ import type { Tool, ToolCall, ToolContext } from '../src/types.js';
 
 const ctx: ToolContext = { stepId: 'step-1' };
 
-const somma = (): Tool<{ a: number; b: number }, number> => ({
-  name: 'somma',
-  description: 'Somma due numeri.',
+const sum = (): Tool<{ a: number; b: number }, number> => ({
+  name: 'sum',
+  description: 'Adds two numbers.',
   schema: {
     type: 'object',
     properties: { a: { type: 'number' }, b: { type: 'number' } },
@@ -21,193 +21,193 @@ const somma = (): Tool<{ a: number; b: number }, number> => ({
 
 const call = (name: string, args: unknown): ToolCall => ({ id: 'call-1', name, args });
 
-describe('ToolRegistry: controlli all’ingresso', () => {
-  it('registra e rende visibili i tool al modello', () => {
-    const registry = new ToolRegistry([somma()]);
+describe('ToolRegistry: checks on the way in', () => {
+  it('registers and makes the tools visible to the model', () => {
+    const registry = new ToolRegistry([sum()]);
     expect(registry.size).toBe(1);
-    expect(registry.names()).toEqual(['somma']);
-    expect(registry.specs()[0]).toMatchObject({ name: 'somma', description: 'Somma due numeri.' });
+    expect(registry.names()).toEqual(['sum']);
+    expect(registry.specs()[0]).toMatchObject({ name: 'sum', description: 'Adds two numbers.' });
   });
 
-  it('rifiuta un nome che non può diventare un identificatore', () => {
-    for (const name of ['9lives', 'con spazio', 'con.punto', '', 'a'.repeat(65)]) {
-      expect(() => new ToolRegistry([{ ...somma(), name }])).toThrow(TypeError);
+  it('rejects a name that cannot become an identifier', () => {
+    for (const name of ['9lives', 'with space', 'with.dot', '', 'a'.repeat(65)]) {
+      expect(() => new ToolRegistry([{ ...sum(), name }])).toThrow(TypeError);
     }
   });
 
-  it('rifiuta una descrizione vuota: il modello non ha nulla su cui basarsi', () => {
-    expect(() => new ToolRegistry([{ ...somma(), description: '   ' }])).toThrow(/descrizione vuota/);
+  it('rejects an empty description: the model has nothing to go on', () => {
+    expect(() => new ToolRegistry([{ ...sum(), description: '   ' }])).toThrow(/empty description/);
   });
 
-  it('rifiuta i duplicati invece di sostituirli in silenzio', () => {
-    const registry = new ToolRegistry([somma()]);
-    expect(() => registry.add(somma())).toThrow(/duplicato/);
+  it('rejects duplicates instead of silently replacing them', () => {
+    const registry = new ToolRegistry([sum()]);
+    expect(() => registry.add(sum())).toThrow(/duplicate/);
     expect(registry.size).toBe(1);
   });
 
-  it('rifiuta uno schema con parole chiave fuori sottoinsieme, all’ingresso', () => {
-    const rotto = { ...somma(), schema: { type: 'string', pattern: '^x$' } as unknown as JsonSchema };
-    expect(() => new ToolRegistry([rotto])).toThrow(UnsupportedSchemaKeywordError);
+  it('rejects a schema with keywords outside the subset, on the way in', () => {
+    const broken = { ...sum(), schema: { type: 'string', pattern: '^x$' } as unknown as JsonSchema };
+    expect(() => new ToolRegistry([broken])).toThrow(UnsupportedSchemaKeywordError);
   });
 
-  it('le specifiche non contengono codice eseguibile', () => {
-    const registry = new ToolRegistry([somma()]);
+  it('the specs contain no executable code', () => {
+    const registry = new ToolRegistry([sum()]);
     expect(Object.keys(registry.specs()[0] as object).sort()).toEqual(['description', 'name', 'schema']);
   });
 });
 
-describe('ToolRegistry: impronta', () => {
-  it('cambia se il corpo del tool cambia', () => {
-    const a = new ToolRegistry([somma()]);
-    const b = new ToolRegistry([{ ...somma(), execute: (input: { a: number; b: number }) => input.a * input.b }]);
-    expect(a.fingerprint('somma')).not.toBe(b.fingerprint('somma'));
+describe('ToolRegistry: fingerprint', () => {
+  it('changes if the tool body changes', () => {
+    const a = new ToolRegistry([sum()]);
+    const b = new ToolRegistry([{ ...sum(), execute: (input: { a: number; b: number }) => input.a * input.b }]);
+    expect(a.fingerprint('sum')).not.toBe(b.fingerprint('sum'));
   });
 
-  it('cambia se lo schema cambia', () => {
-    const a = new ToolRegistry([somma()]);
-    const b = new ToolRegistry([{ ...somma(), schema: { type: 'object', properties: {} } }]);
-    expect(a.fingerprint('somma')).not.toBe(b.fingerprint('somma'));
+  it('changes if the schema changes', () => {
+    const a = new ToolRegistry([sum()]);
+    const b = new ToolRegistry([{ ...sum(), schema: { type: 'object', properties: {} } }]);
+    expect(a.fingerprint('sum')).not.toBe(b.fingerprint('sum'));
   });
 
-  it('è stabile a parità di tool', () => {
-    expect(new ToolRegistry([somma()]).fingerprint('somma')).toBe(new ToolRegistry([somma()]).fingerprint('somma'));
+  it('is stable for the same tool', () => {
+    expect(new ToolRegistry([sum()]).fingerprint('sum')).toBe(new ToolRegistry([sum()]).fingerprint('sum'));
   });
 
-  it('undefined per un tool che non esiste', () => {
-    expect(new ToolRegistry().fingerprint('fantasma')).toBeUndefined();
+  it('undefined for a tool that does not exist', () => {
+    expect(new ToolRegistry().fingerprint('ghost')).toBeUndefined();
   });
 });
 
-describe('invokeTool: il percorso felice', () => {
-  it('esegue e restituisce l’output', async () => {
-    const registry = new ToolRegistry([somma()]);
-    const outcome = await invokeTool(registry, call('somma', { a: 2, b: 3 }), ctx);
+describe('invokeTool: the happy path', () => {
+  it('executes and returns the output', async () => {
+    const registry = new ToolRegistry([sum()]);
+    const outcome = await invokeTool(registry, call('sum', { a: 2, b: 3 }), ctx);
     expect(outcome).toEqual({ ok: true, output: 5 });
   });
 
-  it('passa il contesto al tool', async () => {
-    let visto: string | undefined;
+  it('passes the context to the tool', async () => {
+    let seen: string | undefined;
     const spy: Tool = {
       name: 'spy',
-      description: 'Registra lo step.',
+      description: 'Records the step.',
       schema: { type: 'object' },
       execute: (_input, c) => {
-        visto = c.stepId;
+        seen = c.stepId;
       },
     };
     await invokeTool(new ToolRegistry([spy]), call('spy', {}), { stepId: 'step-7' });
-    expect(visto).toBe('step-7');
+    expect(seen).toBe('step-7');
   });
 });
 
-describe('invokeTool: gli argomenti del modello', () => {
-  it('un tool inesistente diventa un messaggio che elenca quelli veri', async () => {
-    const registry = new ToolRegistry([somma()]);
-    const outcome = await invokeTool(registry, call('moltiplica', {}), ctx);
+describe('invokeTool: the model arguments', () => {
+  it('a nonexistent tool becomes a message listing the real ones', async () => {
+    const registry = new ToolRegistry([sum()]);
+    const outcome = await invokeTool(registry, call('multiply', {}), ctx);
     expect(outcome.ok).toBe(false);
     if (outcome.ok) return;
     expect(outcome.failure.kind).toBe('unknown_tool');
-    expect(outcome.failure.message).toContain('moltiplica');
-    expect(outcome.failure.message).toContain('somma');
+    expect(outcome.failure.message).toContain('multiply');
+    expect(outcome.failure.message).toContain('sum');
   });
 
-  it('gli argomenti invalidi non raggiungono mai il codice del tool', async () => {
-    let eseguito = false;
-    const sorvegliato: Tool<{ a: number; b: number }, number> = {
-      ...somma(),
+  it('invalid arguments never reach the tool code', async () => {
+    let executed = false;
+    const guarded: Tool<{ a: number; b: number }, number> = {
+      ...sum(),
       execute: (input) => {
-        eseguito = true;
+        executed = true;
         return input.a + input.b;
       },
     };
-    const outcome = await invokeTool(new ToolRegistry([sorvegliato]), call('somma', { a: 1 }), ctx);
-    expect(eseguito).toBe(false);
+    const outcome = await invokeTool(new ToolRegistry([guarded]), call('sum', { a: 1 }), ctx);
+    expect(executed).toBe(false);
     expect(outcome.ok).toBe(false);
     if (outcome.ok) return;
     expect(outcome.failure.kind).toBe('invalid_arguments');
     expect(outcome.failure.message).toContain('/b');
   });
 
-  it('il messaggio di validazione cita il campo e cosa manca', () => {
-    const message = invalidArgumentsMessage('somma', [
-      { path: '/b', message: 'campo obbligatorio mancante' },
-      { path: '/a', message: 'atteso number, ricevuto la stringa "x"' },
+  it('the validation message quotes the field and what is missing', () => {
+    const message = invalidArgumentsMessage('sum', [
+      { path: '/b', message: 'required field is missing' },
+      { path: '/a', message: 'expected number, received the string "x"' },
     ]);
-    expect(message).toContain('- /b: campo obbligatorio mancante');
-    expect(message).toContain('- /a: atteso number');
-    expect(message).toContain('Correggi solo i campi indicati');
+    expect(message).toContain('- /b: required field is missing');
+    expect(message).toContain('- /a: expected number');
+    expect(message).toContain('Fix only the fields listed');
   });
 });
 
-describe('invokeTool: cosa si mostra al modello (ADR 0004)', () => {
-  it('ToolError: il messaggio passa intero, il modello può correggere', async () => {
+describe('invokeTool: what is shown to the model (ADR 0004)', () => {
+  it('ToolError: the message passes whole, the model can fix itself', async () => {
     const tool: Tool = {
-      name: 'ordine',
-      description: 'Crea un ordine.',
+      name: 'order',
+      description: 'Creates an order.',
       schema: { type: 'object' },
       execute: () => {
-        throw new ToolError('Giacenze insufficienti per sku-42: disponibili 1, richiesti 3.', true);
+        throw new ToolError('Insufficient stock for sku-42: 1 available, 3 requested.', true);
       },
     };
-    const outcome = await invokeTool(new ToolRegistry([tool]), call('ordine', {}), ctx);
+    const outcome = await invokeTool(new ToolRegistry([tool]), call('order', {}), ctx);
     expect(outcome.ok).toBe(false);
     if (outcome.ok) return;
-    expect(outcome.failure.message).toContain('Giacenze insufficienti');
-    expect(outcome.failure.message).toContain('Puoi riprovare');
+    expect(outcome.failure.message).toContain('Insufficient stock');
+    expect(outcome.failure.message).toContain('You can retry');
   });
 
-  it('un errore non previsto NON raggiunge il modello: niente segreti, niente path', async () => {
+  it('an unexpected error does NOT reach the model: no secrets, no paths', async () => {
     const tool: Tool = {
-      name: 'ordine',
-      description: 'Crea un ordine.',
+      name: 'order',
+      description: 'Creates an order.',
       schema: { type: 'object' },
       execute: () => {
-        throw new Error('401 Unauthorized: token sk-live-ABCDEF su /var/secrets/prod.env');
+        throw new Error('401 Unauthorized: token sk-live-ABCDEF at /var/secrets/prod.env');
       },
     };
-    const outcome = await invokeTool(new ToolRegistry([tool]), call('ordine', {}), ctx);
+    const outcome = await invokeTool(new ToolRegistry([tool]), call('order', {}), ctx);
     expect(outcome.ok).toBe(false);
     if (outcome.ok) return;
-    // il messaggio non contiene nessun pezzo dell'errore vero
+    // the message contains no piece of the real error
     expect(outcome.failure.message).not.toContain('sk-live-ABCDEF');
     expect(outcome.failure.message).not.toContain('/var/secrets');
     expect(outcome.failure.message).not.toContain('401');
-    // e dice cosa fare
-    expect(outcome.failure.message).toContain('Non riprovare più di una volta');
+    // and it says what to do
+    expect(outcome.failure.message).toContain('Do not retry more than once');
   });
 
-  it('il testo non dipende in nessun modo dall’errore vero', async () => {
-    // due tool con lo stesso nome ma cause diverse: messaggi identici bit per bit
-    const boom = (segreto: string): Tool => ({
-      name: 'pagamento',
-      description: 'Esegue il pagamento.',
+  it('the text in no way depends on the real error', async () => {
+    // two tools with the same name but different causes: bit-for-bit identical messages
+    const boom = (secret: string): Tool => ({
+      name: 'payment',
+      description: 'Executes the payment.',
       schema: { type: 'object' },
       execute: () => {
-        throw new Error(segreto);
+        throw new Error(secret);
       },
     });
-    const a = await invokeTool(new ToolRegistry([boom('segreto-1 sk-live-AAA')]), call('pagamento', {}), ctx);
-    const b = await invokeTool(new ToolRegistry([boom('segreto-2 sk-live-BBB')]), call('pagamento', {}), ctx);
+    const a = await invokeTool(new ToolRegistry([boom('secret-1 sk-live-AAA')]), call('payment', {}), ctx);
+    const b = await invokeTool(new ToolRegistry([boom('secret-2 sk-live-BBB')]), call('payment', {}), ctx);
     expect(a.ok).toBe(false);
     if (a.ok || b.ok) return;
     expect(a.failure.message).toBe(b.failure.message);
   });
 });
 
-describe('invokeTool: cancellazione', () => {
-  it('un AbortError attraversa: non è un errore del tool e non va autocorretti', async () => {
+describe('invokeTool: cancellation', () => {
+  it('an AbortError passes through: it is not a tool error and must not be self-corrected', async () => {
     const controller = new AbortController();
     controller.abort();
     const tool: Tool = {
-      name: 'lento',
-      description: 'Tarda.',
+      name: 'slow',
+      description: 'Takes a while.',
       schema: { type: 'object' },
       execute: () => {
-        throw new Error('il chiamante ha annullato');
+        throw new Error('the caller cancelled');
       },
     };
     await expect(
-      invokeTool(new ToolRegistry([tool]), call('lento', {}), { ...ctx, signal: controller.signal }),
-    ).rejects.toThrow(/annullato/);
+      invokeTool(new ToolRegistry([tool]), call('slow', {}), { ...ctx, signal: controller.signal }),
+    ).rejects.toThrow(/cancelled/);
   });
 });

@@ -1,39 +1,39 @@
 /**
- * Adapter per un endpoint chat compatibile con OpenAI.
+ * Adapter for an OpenAI-compatible chat endpoint.
  *
- * È l'unico pezzo di questo progetto che conosce il mondo esterno, ed è piccolo per
- * una ragione precisa: il routing tra provider, i retry e la cache sono il compito
- * di `llmgateway` (vedi il RFC). Qui c'è solo "porta i messaggi, leggi la risposta,
- * dimmi quanto è costata", con il conto esatto dei token — che è la parte che un
- * gateway non può fare al posto nostro, perché la sa solo la risposta.
+ * It is the only piece of this project that knows the outside world, and it is small
+ * for a precise reason: routing between providers, retries and caching are the job of
+ * `llmgateway` (see the RFC). Here there is only "carry the messages, read the answer,
+ * tell me what it cost", with the exact token accounting — which is the part a gateway
+ * cannot do on our behalf, because only the response knows it.
  *
- * Nessuna dipendenza: `fetch` è globale da Node 18.
+ * No dependencies: `fetch` has been global since Node 18.
  */
 
 import { PolicyError } from './errors.js';
 import type { DecideRequest, Policy, PolicyOutcome, ToolSpec, Usage } from './types.js';
 
 export interface OpenAICompatibleOptions {
-  /** Il modello da interrogare. Va anche in `Policy.model`, e questo lo fa per te. */
+  /** The model to query. It also goes into `Policy.model`, and this does that for you. */
   readonly model: string;
-  /** Chiave dell'API. Va in `Authorization: Bearer`. */
+  /** API key. It goes into `Authorization: Bearer`. */
   readonly apiKey: string;
-  /** Base URL. Di default `https://api.openai.com/v1`. */
+  /** Base URL. Defaults to `https://api.openai.com/v1`. */
   readonly baseUrl?: string;
-  /** Intestazioni aggiuntive, per gateway e proxy. */
+  /** Extra headers, for gateways and proxies. */
   readonly headers?: Readonly<Record<string, string>>;
-  /** Tetto di attesa per una risposta. Di default 60 000 ms. */
+  /** Wait cap for a response. Defaults to 60,000 ms. */
   readonly timeoutMs?: number;
-  /** `fetch` sostitutivo: per i test, o per un agente con proxy. */
+  /** Replacement `fetch`: for tests, or for an agent behind a proxy. */
   readonly fetch?: typeof globalThis.fetch;
-  /** Tetto di token di output, demandato al provider. */
+  /** Output token cap, delegated to the provider. */
   readonly maxOutputTokens?: number;
 }
 
 const DEFAULT_BASE_URL = 'https://api.openai.com/v1';
 const DEFAULT_TIMEOUT_MS = 60_000;
 
-/** Una `Policy` che parla a un endpoint compatibile con OpenAI. */
+/** A `Policy` that talks to an OpenAI-compatible endpoint. */
 export function openAICompatible(options: OpenAICompatibleOptions): Policy {
   const baseUrl = options.baseUrl ?? DEFAULT_BASE_URL;
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
@@ -41,8 +41,8 @@ export function openAICompatible(options: OpenAICompatibleOptions): Policy {
   return {
     model: options.model,
     decide: async (request: DecideRequest): Promise<PolicyOutcome> => {
-      const corpo = await callProvider(options, baseUrl, timeoutMs, request);
-      return interpret(corpo);
+      const body = await callProvider(options, baseUrl, timeoutMs, request);
+      return interpret(body);
     },
   };
 }
@@ -71,14 +71,14 @@ async function callProvider(
   const doFetch = options.fetch ?? globalThis.fetch;
   const url = `${baseUrl.replace(/\/+$/, '')}/chat/completions`;
 
-  // il timeout del runtime e quello del chiamante si sommano: se il chiamante
-  // annulla, si annulla anche la richiesta, non solo l'attesa del loop
+  // the runtime timeout and the caller one add up: if the caller cancels, the request
+  // is cancelled too, not just the loop's wait
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
-  const segnale = linkSignals(request.signal, controller.signal);
+  const signal = linkSignals(request.signal, controller.signal);
 
   try {
-    const risposta = await doFetch(url, {
+    const response = await doFetch(url, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
@@ -92,107 +92,106 @@ async function callProvider(
         tool_choice: request.tools.length > 0 ? 'auto' : undefined,
         max_tokens: options.maxOutputTokens,
       }),
-      signal: segnale,
+      signal,
     });
 
-    if (!risposta.ok) {
-      // il corpo dell'errore viene da chi ci abbiamo parlato, non da un terzo:
-      // troncato, va al chiamante. Al *modello* non passa mai (cfr. ADR 0004)
-      const corpo = (await risposta.text()).slice(0, 500);
+    if (!response.ok) {
+      // the error body comes from who we talked to, not from a third party:
+      // truncated, it goes to the caller. It *never* reaches the model (cf. ADR 0004)
+      const body = (await response.text()).slice(0, 500);
       throw new PolicyError(
-        `il provider ha risposto ${risposta.status} ${risposta.statusText}${corpo === '' ? '' : `: ${corpo}`}`,
+        `the provider responded ${response.status} ${response.statusText}${body === '' ? '' : `: ${body}`}`,
       );
     }
 
-    return (await risposta.json()) as ProviderResponse;
+    return (await response.json()) as ProviderResponse;
   } catch (error) {
     if (error instanceof PolicyError) throw error;
     if (request.signal?.aborted === true) {
-      throw new PolicyError('la Policy è stata annullata dal chiamante', { cause: error });
+      throw new PolicyError('the Policy was cancelled by the caller', { cause: error });
     }
-    throw new PolicyError('la chiamata al provider è fallita', { cause: error });
+    throw new PolicyError('the call to the provider failed', { cause: error });
   } finally {
     clearTimeout(timer);
   }
 }
 
 /**
- * La risposta del provider diventa una decisione.
+ * The provider response becomes a decision.
  *
- * Il punto delicato è `finish_reason`. Un provider che termina con `tool_calls` ha
- * **chiamato** un tool, non chiesto che ne venga chiamato uno: se i due casi venissero
- * confusi, il loop eseguirebbe un tool che il modello stava solo descrivendo. Qui la
- * distinzione è esplicita e un caso sconosciuto è un errore, non un default.
+ * The delicate point is `finish_reason`. A provider that ends with `tool_calls` has
+ * **called** a tool, it did not ask for one to be called: if the two cases were
+ * confused, the loop would execute a tool the model was only describing. Here the
+ * distinction is explicit and an unknown case is an error, not a default.
  */
-export function interpret(corpo: ProviderResponse): PolicyOutcome {
-  const scelta = corpo.choices?.[0];
-  if (scelta === undefined) {
-    throw new PolicyError('il provider ha risposto senza scelte');
+export function interpret(body: ProviderResponse): PolicyOutcome {
+  const choice = body.choices?.[0];
+  if (choice === undefined) {
+    throw new PolicyError('the provider responded with no choices');
   }
 
   const usage: Usage = {
-    inputTokens: corpo.usage?.prompt_tokens ?? 0,
-    outputTokens: corpo.usage?.completion_tokens ?? 0,
+    inputTokens: body.usage?.prompt_tokens ?? 0,
+    outputTokens: body.usage?.completion_tokens ?? 0,
   };
-  const model = corpo.model ?? 'sconosciuto';
+  const model = body.model ?? 'unknown';
 
-  const chiamate = scelta.message?.tool_calls ?? [];
-  if (chiamate.length > 0) {
-    const prima = chiamate[0];
-    const nome = prima?.function?.name;
-    if (nome === undefined || nome === '') {
-      throw new PolicyError('il provider ha restituito una tool call senza nome');
+  const calls = choice.message?.tool_calls ?? [];
+  if (calls.length > 0) {
+    const first = calls[0];
+    const name = first?.function?.name;
+    if (name === undefined || name === '') {
+      throw new PolicyError('the provider returned a tool call with no name');
     }
     return {
       decision: {
         type: 'tool',
-        call: { id: prima?.id ?? 'call-0', name: nome, args: parseArguments(prima?.function?.arguments) },
+        call: { id: first?.id ?? 'call-0', name, args: parseArguments(first?.function?.arguments) },
       },
       usage,
       model,
     };
   }
 
-  const testo = scelta.message?.content ?? '';
-  if (testo.trim() === '') {
-    // una risposta vuota non è una risposta: meglio fallire che chiudere il run
-    // con un `answer` vuoto che sembrerebbe una risposta
+  const text = choice.message?.content ?? '';
+  if (text.trim() === '') {
+    // an empty response is not a response: better to fail than to close the run
+    // with an empty `answer` that would look like an answer
     throw new PolicyError(
-      `il provider ha restituito una risposta vuota (finish_reason: ${scelta.finish_reason ?? 'nessuno'})`,
+      `the provider returned an empty response (finish_reason: ${choice.finish_reason ?? 'none'})`,
     );
   }
-  return { decision: { type: 'message', content: testo }, usage, model };
+  return { decision: { type: 'message', content: text }, usage, model };
 }
 
 /**
- * Gli argomenti di un tool sono una stringa JSON: se non è JSON valido è un errore
- * del provider, non un caso da tollerare. Non si "prova a indovinare" perché un
- * fallback silenzioso qui significa che il tool riceve `{}` e fa qualcosa di diverso
- * da quello che il modello voleva.
+ * Tool arguments are a JSON string: if it is not valid JSON it is a provider error,
+ * not a case to tolerate. It does not "try to guess", because a silent fallback here
+ * means the tool receives `{}` and does something different from what the model wanted.
  */
 function parseArguments(raw: string | undefined): unknown {
   if (raw === undefined || raw === '') return {};
   try {
     return JSON.parse(raw);
   } catch (error) {
-    throw new PolicyError(`gli argomenti del tool non sono JSON valido: ${raw.slice(0, 200)}`, { cause: error });
+    throw new PolicyError(`the tool arguments are not valid JSON: ${raw.slice(0, 200)}`, { cause: error });
   }
 }
 
-/** Traduce un messaggio interno nel formato del provider. */
-function toWireMessage(messaggio: DecideRequest['messages'][number]): Record<string, unknown> {
-  if (messaggio.role === 'tool') {
+/** Translates an internal message into the provider format. */
+function toWireMessage(message: DecideRequest['messages'][number]): Record<string, unknown> {
+  if (message.role === 'tool') {
     return {
       role: 'tool',
-      tool_call_id: messaggio.tool_call_id,
-      name: messaggio.name,
-      content: messaggio.content,
+      tool_call_id: message.tool_call_id,
+      name: message.name,
+      content: message.content,
     };
   }
-  return { role: messaggio.role, content: messaggio.content };
+  return { role: message.role, content: message.content };
 }
 
-/** Traduce una `ToolSpec` nel formato `function` del provider. */
+/** Translates a `ToolSpec` into the provider's `function` format. */
 function toWireTool(tool: ToolSpec): Record<string, unknown> {
   return {
     type: 'function',
@@ -200,15 +199,15 @@ function toWireTool(tool: ToolSpec): Record<string, unknown> {
   };
 }
 
-/** Due segnali in uno, se il chiamante ne ha passato uno. */
+/** Two signals into one, if the caller passed one. */
 function linkSignals(a: AbortSignal | undefined, b: AbortSignal): AbortSignal {
   if (a === undefined) return b;
   const controller = new AbortController();
-  const annulla = (): void => controller.abort();
+  const cancel = (): void => controller.abort();
   if (a.aborted || b.aborted) controller.abort();
   else {
-    a.addEventListener('abort', annulla, { once: true });
-    b.addEventListener('abort', annulla, { once: true });
+    a.addEventListener('abort', cancel, { once: true });
+    b.addEventListener('abort', cancel, { once: true });
   }
   return controller.signal;
 }

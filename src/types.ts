@@ -1,144 +1,144 @@
 /**
- * I tipi che attraversano tutto il runtime.
+ * The types that flow through the whole runtime.
  *
- * Sono deliberatamente **readonly**: lo stato del run non si muta, si sostituisce
- * (vedi ADR 0001). Un campo mutabile qui dentro è un bug che aspetta di succedere.
+ * They are deliberately **readonly**: run state is never mutated, it is replaced
+ * (see ADR 0001). A mutable field in here is a bug waiting to happen.
  */
 
-/** Ruolo di un messaggio nella conversazione. I nomi sono quelli del formato chat OpenAI. */
+/** Role of a message in the conversation. The names are those of the OpenAI chat format. */
 export type Role = 'system' | 'user' | 'assistant' | 'tool';
 
-/** Un messaggio della conversazione. I campi opzionali valgono solo dove servono. */
+/** A conversation message. The optional fields only apply where they are needed. */
 export interface Message {
   readonly role: Role;
   readonly content: string;
-  /** Presente solo su `role: 'tool'`: a quale chiamata risponde. */
+  /** Present only on `role: 'tool'`: which call this answers. */
   readonly tool_call_id?: string;
-  /** Presente solo su `role: 'tool'`: quale tool ha prodotto questo contenuto. */
+  /** Present only on `role: 'tool'`: which tool produced this content. */
   readonly name?: string;
 }
 
-/** Una richiesta di esecuzione tool, così come esce dal modello. */
+/** A request to execute a tool, exactly as it comes out of the model. */
 export interface ToolCall {
   readonly id: string;
   readonly name: string;
-  /** Non validato: `args` è ciò che il modello ha prodotto, e va verificato. */
+  /** Not validated: `args` is whatever the model produced, and it must be checked. */
   readonly args: unknown;
 }
 
-/** Token consumati da una singola chiamata al provider. */
+/** Tokens consumed by a single call to the provider. */
 export interface Usage {
   readonly inputTokens: number;
   readonly outputTokens: number;
 }
 
-/** Perché il loop si è fermato. Sempre esplicito: un `stop` senza motivo è un bug. */
+/** Why the loop stopped. Always explicit: a `stop` without a reason is a bug. */
 export type StopReason =
-  /** il modello ha risposto con un messaggio finale */
+  /** the model answered with a final message */
   | 'end_turn'
-  /** si è esaurito il numero di passi consentiti */
+  /** the allowed number of steps ran out */
   | 'max_steps'
-  /** il budget di denaro non lo permetteva */
+  /** the money budget did not allow it */
   | 'budget'
-  /** qualcuno ha chiamato `abort()` */
+  /** someone called `abort()` */
   | 'aborted';
 
-/** Cosa ha deciso il modello a un passo. */
+/** What the model decided at one step. */
 export type Decision =
   | { readonly type: 'message'; readonly content: string }
   | { readonly type: 'tool'; readonly call: ToolCall }
   | { readonly type: 'stop'; readonly reason: StopReason };
 
-/** Esito di una decisione: la scelta **e** quanto è costata. */
+/** Outcome of a decision: the choice **and** what it cost. */
 export interface PolicyOutcome {
   readonly decision: Decision;
   readonly usage: Usage;
-  /** Il modello che ha risposto. Determina il prezzo, quindi serve al budget. */
+  /** The model that answered. It determines the price, so the budget needs it. */
   readonly model: string;
 }
 
-/** Cosa vede il modello: la descrizione di un tool, non il suo codice. */
+/** What the model sees: the description of a tool, not its code. */
 export interface ToolSpec {
   readonly name: string;
   readonly description: string;
   readonly schema: import('./schema.js').JsonSchema;
 }
 
-/** Ciò che un tool può usare del mondo esterno durante l'esecuzione. */
+/** What a tool may use from the outside world while it runs. */
 export interface ToolContext {
-  /** Segnale di cancellazione propagato dal chiamante. */
+  /** Cancellation signal propagated by the caller. */
   readonly signal?: AbortSignal;
-  /** Identificatore del passo corrente, per log e correlazione. */
+  /** Identifier of the current step, for logs and correlation. */
   readonly stepId: string;
 }
 
 /**
- * Un tool: nome, contratto di ingresso (JSON Schema), e il codice che lo esegue.
+ * A tool: name, input contract (JSON Schema), and the code that executes it.
  *
- * `I` e `O` sono per il chiamante TypeScript. **Non** sostituiscono la validazione:
- * lo schema è la garanzia a runtime, i generici sono la comodità in compilazione.
+ * `I` and `O` are for the TypeScript caller. They do **not** replace validation:
+ * the schema is the runtime guarantee, the generics are compile-time convenience.
  */
 export interface Tool<I = unknown, O = unknown> extends ToolSpec {
   execute(input: I, ctx: ToolContext): Promise<O> | O;
   /**
-   * Se `true`, argomenti e risultato finiscono in traccia **redatti**: al posto dei
-   * valori si scrive solo la dimensione. Serve quando il tool tocca dati personali.
+   * If `true`, arguments and result go into the trace **redacted**: only the size
+   * is written instead of the values. Needed when a tool touches personal data.
    */
   readonly sensitive?: boolean;
 }
 
 /**
- * Un tool con i tipi degli argomenti eroduti: è quello che il registro può contenere.
+ * A tool with erased argument types: this is what the registry can hold.
  *
- * `never` come parametro di ingresso è il trucco che rende il registro compatibile
- * con tool tipizzati. In TypeScript i parametri sono in posizione controvariante:
- * `Tool<{a: number}, number>` non è assegnabile a un registro che vuole
- * `Tool<unknown, unknown>`, perché `execute` accetterebbe qualunque cosa. Con `never`
- * la coerenza torna, perché `never` è assegnabile a ogni tipo: il registro rinuncia
- * a sapere quali sono gli argomenti, che è esattamente il suo lavoro — la garanzia
- * la dà lo schema, a runtime, dove conta.
+ * Using `never` as the input parameter is the trick that makes the registry
+ * compatible with typed tools. In TypeScript parameters are in a contravariant
+ * position: `Tool<{a: number}, number>` is not assignable to a registry that wants
+ * `Tool<unknown, unknown>`, because `execute` would accept anything. With `never`
+ * consistency comes back, because `never` is assignable to every type: the registry
+ * gives up knowing what the arguments are, which is exactly its job — the guarantee
+ * comes from the schema, at runtime, where it matters.
  */
 export type AnyTool = Tool<never, unknown>;
 
-/** Il cervello: chi decide, a ogni passo. */
+/** The brain: who decides, at every step. */
 export interface Policy {
   /**
-   * Il modello che verrà interrogato.
+   * The model that will be queried.
    *
-   * **Obbligatorio.** Il prezzo è ciò che trasforma un contatore di token in un
-   * tetto di spesa, e senza sapere quale modello risponde il budget non può fare il
-   * suo lavoro. Una Policy che non lo dichiara è un bug, non un caso limite.
+   * **Required.** The price is what turns a token counter into a spending cap, and
+   * without knowing which model answers, the budget cannot do its job. A Policy that
+   * does not declare it is a bug, not an edge case.
    */
   readonly model: string;
   decide(request: DecideRequest): Promise<PolicyOutcome>;
 }
 
-/** Tutto ciò che una `Policy` sa del mondo quando deve decidere. */
+/** Everything a `Policy` knows about the world when it has to decide. */
 export interface DecideRequest {
   readonly messages: readonly Message[];
   readonly tools: readonly ToolSpec[];
   readonly signal?: AbortSignal;
 }
 
-/** Il motivo di un tool che ha restituito un errore al modello. */
+/** The reason a tool returned an error to the model. */
 export type ToolFailureKind =
-  /** gli argomenti non rispettano lo schema */
+  /** the arguments do not match the schema */
   | 'invalid_arguments'
-  /** il modello ha chiesto un tool che non esiste */
+  /** the model asked for a tool that does not exist */
   | 'unknown_tool'
-  /** il tool è esploso */
+  /** the tool blew up */
   | 'execution_failed';
 
-/** Cosa il loop mette in `role: 'tool'` quando il tool fallisce. */
+/** What the loop puts into `role: 'tool'` when the tool fails. */
 export interface ToolFailure {
   readonly kind: ToolFailureKind;
-  /** Messaggio in chiaro, scritto perché un modello lo legga e lo corregga. */
+  /** Plain message, written so a model can read it and fix itself. */
   readonly message: string;
-  /** Dettaglio strutturato, per il chiamante e per la traccia. */
+  /** Structured detail, for the caller and for the trace. */
   readonly detail?: unknown;
 }
 
-/** Un singolo passo del run, dal punto di vista della Policy. */
+/** A single step of the run, from the Policy's point of view. */
 export interface RunState {
   readonly step: number;
   readonly messages: readonly Message[];

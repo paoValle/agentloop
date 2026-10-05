@@ -3,14 +3,14 @@ import { describe, expect, it } from 'vitest';
 import { Budget, costOf, formatUsd, micros, usd, UNKNOWN_MODEL } from '../src/budget.js';
 import { BudgetExceededError } from '../src/errors.js';
 
-describe('unità di denaro', () => {
-  it('converte dollari in micro-dollari senza perdite', () => {
+describe('money units', () => {
+  it('converts dollars into micro-dollars with no loss', () => {
     expect(usd(0.25)).toBe(250_000);
     expect(usd(1)).toBe(1_000_000);
     expect(formatUsd(micros(1234))).toBe('0.001234');
   });
 
-  it('rifiuta valori che non sono soldi', () => {
+  it('rejects values that are not money', () => {
     expect(() => usd(Number.NaN)).toThrow(TypeError);
     expect(() => usd(Number.POSITIVE_INFINITY)).toThrow(TypeError);
     expect(() => usd(-1)).toThrow(RangeError);
@@ -18,41 +18,41 @@ describe('unità di denaro', () => {
 });
 
 describe('costOf', () => {
-  it('calcola sul prezzo per milione di token', () => {
-    // 1M token input a 3 µUSD/M + 1M output a 15 µUSD/M = 18 µUSD
+  it('computes on the price per million tokens', () => {
+    // 1M input tokens at 3 µUSD/M + 1M output at 15 µUSD/M = 18 µUSD
     const price = { input: micros(3), output: micros(15) };
     expect(costOf({ inputTokens: 1_000_000, outputTokens: 1_000_000 }, price)).toBe(18);
   });
 
-  it('arrotonda per eccesso: mai sotto, mai a credito', () => {
+  it('rounds up: never under, never on credit', () => {
     const price = { input: micros(3), output: micros(15) };
-    // 1 token da 3 µUSD/M = 0.000003 µUSD: deve diventare 1, non 0
+    // 1 token at 3 µUSD/M = 0.000003 µUSD: it must become 1, not 0
     expect(costOf({ inputTokens: 1, outputTokens: 0 }, price)).toBe(1);
     expect(costOf({ inputTokens: 0, outputTokens: 1 }, price)).toBe(1);
   });
 
-  it('non perde precisione dove il float fallirebbe', () => {
-    // 0.1 + 0.2 !== 0.3 in float: in micro-dollari interi la somma torna
+  it('loses no precision where a float would fail', () => {
+    // 0.1 + 0.2 !== 0.3 in float: in integer micro-dollars the sum works out
     const sum = usd(0.1) + usd(0.2);
     expect(sum).toBe(usd(0.3));
     expect(sum === 0.3 * 1_000_000).toBe(true);
   });
 
-  it('rifiuta token negativi o non finiti', () => {
+  it('rejects negative or non-finite tokens', () => {
     expect(() => costOf({ inputTokens: -1, outputTokens: 0 }, UNKNOWN_MODEL)).toThrow(RangeError);
     expect(() => costOf({ inputTokens: Number.NaN, outputTokens: 0 }, UNKNOWN_MODEL)).toThrow(TypeError);
   });
 });
 
-describe('Budget: prenota, poi salda', () => {
-  it('partenza pulita', () => {
+describe('Budget: reserve, then settle', () => {
+  it('clean start', () => {
     const b = new Budget(usd(1));
     expect(b.spent).toBe(0);
     expect(b.held).toBe(0);
     expect(b.available).toBe(usd(1));
   });
 
-  it('una prenotazione blocca il denaro fino al saldo', () => {
+  it('a reservation locks the money until settlement', () => {
     const b = new Budget(usd(1));
     const r = b.reserve(usd(0.4));
     expect(b.held).toBe(usd(0.4));
@@ -65,7 +65,7 @@ describe('Budget: prenota, poi salda', () => {
     expect(b.available).toBe(usd(0.7));
   });
 
-  it('la stima sovrastimata non brucia denaro', () => {
+  it('an overestimated reservation does not burn money', () => {
     const b = new Budget(usd(1));
     const r = b.reserve(usd(0.9));
     b.settle(r, micros(1));
@@ -73,7 +73,7 @@ describe('Budget: prenota, poi salda', () => {
     expect(b.available).toBe(usd(1) - 1);
   });
 
-  it('release libera senza spendere', () => {
+  it('release frees without spending', () => {
     const b = new Budget(usd(1));
     const r = b.reserve(usd(0.5));
     b.release(r);
@@ -81,20 +81,20 @@ describe('Budget: prenota, poi salda', () => {
     expect(b.spent).toBe(0);
   });
 
-  it('superare il tetto fallisce PRIMA della spesa', () => {
+  it('going over the cap fails BEFORE the spending', () => {
     const b = new Budget(usd(1));
     b.reserve(usd(0.8));
     expect(() => b.reserve(usd(0.3))).toThrow(BudgetExceededError);
-    // e il denaro non si è mosso
+    // and the money did not move
     expect(b.spent).toBe(0);
     expect(b.available).toBe(usd(0.2));
   });
 
-  it("l'errore di budget dice quanto serviva e quanto c'era", () => {
+  it('the budget error says how much was needed and how much was there', () => {
     const b = new Budget(usd(1));
     try {
       b.reserve(usd(2));
-      expect.unreachable('doveva lanciare');
+      expect.unreachable('it was supposed to throw');
     } catch (error) {
       expect(error).toBeInstanceOf(BudgetExceededError);
       const e = error as BudgetExceededError;
@@ -103,15 +103,15 @@ describe('Budget: prenota, poi salda', () => {
     }
   });
 
-  it('una prenotazione si tocca una volta sola', () => {
+  it('a reservation is touched once only', () => {
     const b = new Budget(usd(1));
     const r = b.reserve(usd(0.1));
     b.settle(r, usd(0.1));
-    expect(() => b.settle(r, usd(0.1))).toThrow(/una volta sola/);
-    expect(() => b.release(r)).toThrow(/una volta sola/);
+    expect(() => b.settle(r, usd(0.1))).toThrow(/touched once only/);
+    expect(() => b.release(r)).toThrow(/touched once only/);
   });
 
-  it('le prenotazioni aperte sono visibili: una dimenticata è un bug visibile', () => {
+  it('open reservations are visible: a forgotten one is a visible bug', () => {
     const b = new Budget(usd(1));
     const r = b.reserve(usd(0.1));
     expect(b.openReservations).toEqual([r.id]);
@@ -119,14 +119,14 @@ describe('Budget: prenota, poi salda', () => {
     expect(b.openReservations).toEqual([]);
   });
 
-  it('canAfford non prenota nulla', () => {
+  it('canAfford reserves nothing', () => {
     const b = new Budget(usd(1));
     expect(b.canAfford(usd(1))).toBe(true);
     expect(b.canAfford(micros(usd(1) + 1))).toBe(false);
     expect(b.held).toBe(0);
   });
 
-  it('lo snapshot racconta il quadro completo', () => {
+  it('the snapshot tells the whole picture', () => {
     const b = new Budget(usd(2));
     b.reserve(usd(0.5));
     expect(b.snapshot()).toEqual({
@@ -138,8 +138,8 @@ describe('Budget: prenota, poi salda', () => {
   });
 });
 
-describe('Budget: tetto mai scavalcato nella somma', () => {
-  it('mille prenotazioni uguali non sommano oltre il tetto', () => {
+describe('Budget: cap never overrun in the sum', () => {
+  it('a thousand equal reservations do not sum past the cap', () => {
     const b = new Budget(micros(1000));
     const accepted: number[] = [];
     for (let i = 0; i < 10_000; i++) {

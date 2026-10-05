@@ -2,7 +2,7 @@
   "name": "@paovalle/agentloop",
   "version": "0.0.0",
   "private": true,
-  "description": "TODO: una riga sul perche esiste.",
+  "description": "TODO: one line about why it exists.",
   "license": "MIT",
   "type": "module",
   "engines": {
@@ -15,8 +15,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "ci": "npm run typecheck && npm run lint && npm run test",
-    "dev": "tsx examples/agente-voli.ts",
-    "example": "tsx examples/agente-voli.ts"
+    "dev": "tsx examples/flight-agent.ts",
+    "example": "tsx examples/flight-agent.ts"
   },
   "devDependencies": {
     "typescript": "^5.7.0",

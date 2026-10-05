@@ -1,24 +1,24 @@
 /**
- * `agentloop` — un runtime agentico piccolo e leggibile.
+ * `agentloop` — a small and readable agentic runtime.
  *
- * Quattro cose, e nient'altro:
+ * Four things, and nothing else:
  *
- * - un **loop** dichiarativo, in cui ogni effetto passa da un'interfaccia;
- * - **tool** con argomenti validati da JSON Schema, che sbagliano senza far male;
- * - un **budget** che si prenota prima di spendere e non può essere scavalcato;
- * - una **traccia** append-only da cui il run si **rifà** senza rete.
+ * - a declarative **loop**, where every effect goes through an interface;
+ * - **tools** with arguments validated by JSON Schema, that fail without hurting;
+ * - a **budget** that is reserved before spending and cannot be bypassed;
+ * - an append-only **trace** from which the run can be **replayed** with no network.
  *
  * ```ts
  * const result = await run({
  *   policy: openAICompatible({ model: 'gpt-4o-mini', apiKey: process.env.OPENAI_API_KEY! }),
- *   tools: new ToolRegistry([cercaVoli]),
- *   messages: [{ role: 'user', content: ' cheapesti volo Napoli-Roma' }],
+ *   tools: new ToolRegistry([searchFlights]),
+ *   messages: [{ role: 'user', content: 'cheapest flight Naples-Rome' }],
  *   budget: new Budget(usd(0.10)),
  * });
  * ```
  *
- * Le decisioni che reggono tutto questo sono in `docs/adr/`, e valgono quanto il
- * codice: se una di loro è sbagliata, il codice è semplicemente una conseguenza.
+ * The decisions that hold all of this up are in `docs/adr/`, and they weigh as much
+ * as the code: if one of them is wrong, the code is simply a consequence.
  */
 
 export { run, resolvePrice, type PriceTable, type RunOptions, type RunResult, type Estimation } from './loop.js';
