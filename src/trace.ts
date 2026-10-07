@@ -17,6 +17,8 @@
  *   that it degraded.
  * - **a huge output blows up the file.** Truncation with the exact count of what was
  *   cut, because a trace that lies while looking complete is worse than a missing one.
+ *   `policy.raw` — the provider's response, kept verbatim for a policy that asked for it
+ *   (ADR 0005) — goes through the same cap.
  */
 
 import type { Decision, Message, StopReason, ToolCall, ToolFailure, Usage } from './types.js';
@@ -59,6 +61,7 @@ export type TraceEvent =
   | (TraceBase & { type: 'step.start'; step: number })
   | (TraceBase & { type: 'policy.request'; step: number; model: string; messageCount: number })
   | (TraceBase & { type: 'policy.response'; step: number; model: string; usage: Usage; decision: Decision })
+  | (TraceBase & { type: 'policy.raw'; step: number; model: string; body: unknown })
   | (TraceBase & { type: 'tool.call'; step: number; call: TraceableToolCall; sensitive: boolean; fingerprint?: string })
   | (TraceBase & { type: 'tool.result'; step: number; callId: string; tool: string; outcome: ToolOutcomeTrace })
   | (TraceBase & { type: 'budget.settle'; step: number; reserved: number; actual: number })

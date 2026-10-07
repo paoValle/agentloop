@@ -425,3 +425,23 @@ describe('run: the trace tells the run', () => {
     expect((await execute()).trace.normalized()).toEqual((await execute()).trace.normalized());
   });
 });
+
+describe('the trace carries what the policy chose to keep', () => {
+  it('writes the provider response verbatim as a policy.raw event', async () => {
+    const raw = { id: 'chatcmpl-1', choices: [{ message: { content: 'hi' } }] };
+    const result = await run({
+      policy: script([{ ...message('hi'), raw }]),
+      budget: new Budget(usd(1)),
+      messages: start,
+    });
+
+    const written = result.trace.events.filter((event) => event.type === 'policy.raw');
+    expect(written).toHaveLength(1);
+    expect(written[0]).toMatchObject({ step: 0, model: 'cheap', body: raw });
+  });
+
+  it('writes no such event when the policy does not return one', async () => {
+    const result = await run({ policy: script([message('hi')]), budget: new Budget(usd(1)), messages: start });
+    expect(result.trace.events.some((event) => event.type === 'policy.raw')).toBe(false);
+  });
+});

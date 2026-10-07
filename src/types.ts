@@ -55,6 +55,14 @@ export interface PolicyOutcome {
   readonly usage: Usage;
   /** The model that answered. It determines the price, so the budget needs it. */
   readonly model: string;
+  /**
+   * The provider's response, verbatim, when the policy was configured to keep it.
+   *
+   * The trace carries it as data and the runtime never interprets it (ADR 0005): the
+   * format belongs to the provider and changes from one provider to the next. Absent
+   * unless the policy asked for it, because it is the largest thing a trace can hold.
+   */
+  readonly raw?: unknown;
 }
 
 /** What the model sees: the description of a tool, not its code. */

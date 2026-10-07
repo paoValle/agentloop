@@ -187,6 +187,17 @@ export async function run(options: RunOptions): Promise<RunResult> {
       // sensitive they must be redacted here too, not only in tool.call
       decision: redactedDecision(outcome.decision, tools),
     });
+    // The provider's own response, when the policy asked to keep it (ADR 0005). Written as it
+    // arrived: the runtime does not interpret a format it does not own, and a reader that needs
+    // "why did it decide that" has the answer next to the decision rather than in another file.
+    if (outcome.raw !== undefined) {
+      trace.append({
+        type: 'policy.raw',
+        step,
+        model: outcome.model,
+        body: prepareForTrace(outcome.raw, { sensitive: false }),
+      });
+    }
     trace.append({ type: 'budget.settle', step, reserved: estimate, actual });
 
     messages = [...messages, assistantMessage(outcome.decision)];
