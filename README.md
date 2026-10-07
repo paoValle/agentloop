@@ -46,7 +46,8 @@ prototype and something that runs in production.
   and the error goes back to the model in readable form so it can fix itself.
 - **Budget with reservation.** Estimate first, settle after. The cap holds **in front
   of** the spend, not after it.
-- **Append-only trace in JSONL.** With redaction declared for sensitive tools.
+- **Append-only trace in JSONL.** With redaction declared for sensitive tools, and the
+  provider's own response kept verbatim when the policy asks for it (ADR 0005).
 - **Deterministic replay.** A run is redone from a trace without touching the network.
 
 ## What it does NOT do
@@ -192,9 +193,10 @@ consequence.
 - **The tool fingerprint only covers the body of `execute`**, not the imported helpers.
   A change inside a helper does not invalidate the trace. I chose the limit because the
   alternative (hashing the import graph) costs more than the benefit.
-- **The decisions of a `Policy` are not inspectable.** I can record the trace and the
-  cost, not the reasoning. Whoever wants to understand *why* it chose a tool will have to
-  go into the provider.
+- **The reasoning behind a decision is kept, not understood.** With `recordRaw` the
+  provider's response is in the trace as data (ADR 0005), which answers "why did it decide
+  that" on the runs where someone asks. What the runtime still does not do is interpret it:
+  reading the reason means knowing the provider's format, and that stays a person's job.
 
 ## Development
 

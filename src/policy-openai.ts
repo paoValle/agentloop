@@ -28,6 +28,14 @@ export interface OpenAICompatibleOptions {
   readonly fetch?: typeof globalThis.fetch;
   /** Output token cap, delegated to the provider. */
   readonly maxOutputTokens?: number;
+  /**
+   * Keep the provider's response verbatim in the trace, as a `policy.raw` event (ADR 0005).
+   *
+   * Off by default: it is the largest thing a trace can carry, and a replay comparing traces
+   * must use the same setting. Asked for when the trace has to answer "why did it decide
+   * that", which is a question the decisions alone cannot answer.
+   */
+  readonly recordRaw?: boolean;
 }
 
 const DEFAULT_BASE_URL = 'https://api.openai.com/v1';
@@ -42,7 +50,8 @@ export function openAICompatible(options: OpenAICompatibleOptions): Policy {
     model: options.model,
     decide: async (request: DecideRequest): Promise<PolicyOutcome> => {
       const body = await callProvider(options, baseUrl, timeoutMs, request);
-      return interpret(body);
+      const outcome = interpret(body);
+      return options.recordRaw === true ? { ...outcome, raw: body } : outcome;
     },
   };
 }

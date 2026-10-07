@@ -181,4 +181,13 @@ describe('openAICompatible', () => {
     });
     await expect(policy.decide({ messages: [{ role: 'user', content: 'x' }], tools: [] })).rejects.toThrow(PolicyError);
   });
+
+  it('keeps the provider response verbatim only when asked to', async () => {
+    const body = { model: 'gpt-4o-mini', choices: [{ message: { content: 'ok' } }] };
+    const silent = openAICompatible({ ...base, fetch: async () => response(body) });
+    const loud = openAICompatible({ ...base, recordRaw: true, fetch: async () => response(body) });
+
+    expect((await silent.decide({ messages: [], tools: [] })).raw).toBeUndefined();
+    expect((await loud.decide({ messages: [], tools: [] })).raw).toEqual(body);
+  });
 });

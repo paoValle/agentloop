@@ -5,6 +5,12 @@ versioning [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- `policy.raw`: the provider's response, verbatim, in the trace, when a policy is configured with
+  `recordRaw`. The runtime stores it as data and never interprets it (ADR 0005); the event sits next
+  to the `policy.response` it explains and goes through the same truncation as tool output. Off by
+  default, because it is the largest thing a trace can carry.
+
 ## [0.1.0] - 2026-10-04
 
 First usable version. No stability promised: it is a side project.
